@@ -546,28 +546,27 @@ function defaultState(){
         id:'r1', label:'Round 1', course:'Twin Warriors', date:'',
         format:'sixes', visible: true,
         par: KNOWN_SCORECARDS['Twin Warriors'].par.slice(), hcpIndex: KNOWN_SCORECARDS['Twin Warriors'].hcpIndex.slice(),
-        groups: [], quads: [], pairs: [],
+        groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r1.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r1.ld.slice()
       },
       {
         id:'r2', label:'Round 2', course:'Paako Ridge', date:'',
         format:'pairs', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
-        groups: [], quads: [], pairs: [],
+        groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r2.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r2.ld.slice()
       },
       {
         id:'r3', label:'Round 3', course:'Sandia Resort', date:'',
         format:'stroke', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
-        groups: [], quads: [], pairs: [],
+        groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r3.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r3.ld.slice()
       }
     ],
     scores: {}, // key `${roundId}__${player}__${hole}` -> strokes (number)
     kp: {},     // key `${roundId}__${player}__${hole}` -> {feet, inches}
-    ld: {},     // key `${roundId}__${player}__${hole}` -> {checked, ts}
-    teeGroups: [] // [{id, name, players:[...4 names...]}] — controls who a device can enter scores for
+    ld: {}      // key `${roundId}__${player}__${hole}` -> {checked, ts}
   };
 }
 
@@ -666,13 +665,13 @@ function normalizeState(s){
     groups: Array.isArray(r.groups) ? r.groups : [],
     quads: Array.isArray(r.quads) ? r.quads : [],
     pairs: Array.isArray(r.pairs) ? r.pairs : [],
+    teeGroups: Array.isArray(r.teeGroups) ? r.teeGroups : [],
     kpHoles: Array.isArray(r.kpHoles) ? r.kpHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].kp.slice()) || []),
     ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || [])
   }));
   if(!s.scores || typeof s.scores !== 'object') s.scores = {};
   if(!s.kp || typeof s.kp !== 'object') s.kp = {};
   if(!s.ld || typeof s.ld !== 'object') s.ld = {};
-  if(!Array.isArray(s.teeGroups)) s.teeGroups = [];
   if(!s.name) s.name = 'Golf Tournament';
   return s;
 }
@@ -1021,19 +1020,26 @@ function renderLeaderboard(){
   }
 }
 
-function myTeeGroup(){
-  if(!state.teeGroups || !state.teeGroups.length) return null;
-  const myId = localStorage.getItem('myTeeGroupId');
-  if(!myId) return undefined; // no selection made yet
-  return state.teeGroups.find(g=>g.id===myId) || undefined;
+function myTeeGroup(round){
+  const groups = round.teeGroups || [];
+  if(!groups.length) return null; // no lock configured for this round
+  const myId = localStorage.getItem(`myTeeGroupId_${round.id}`);
+  if(!myId) return undefined; // no selection made yet for this round
+  return groups.find(g=>g.id===myId) || undefined;
 }
 
-function renderGroupPicker(){
-  const groups = state.teeGroups||[];
+function renderGroupPicker(round, visRounds){
+  const groups = round.teeGroups || [];
   return `
     <h2 class="section-title">Select Your Foursome</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0;">Pick the group you're playing in. This phone will only be able to enter scores for these 4 players.</p>
+      <label>Round</label>
+      <select id="pickerRoundSelect">
+        ${visRounds.map(r=>`<option value="${r.id}" ${r.id===round.id?'selected':''}>${escapeHtml(r.label)} — ${escapeHtml(r.course)}</option>`).join('')}
+      </select>
+      <p class="muted" style="margin:10px 0 0;">Pick the group you're playing in for ${escapeHtml(round.label)}. This phone will only be able to enter scores for these 4 players, for this round.</p>
+    </div>
+    <div class="card">
       ${groups.map(g=>`
         <button class="btn secondary" data-pick-teegroup="${g.id}" style="margin-bottom:10px; text-align:left; padding:14px 16px;">
           <div style="font-family:'Oswald',sans-serif; font-size:15px; margin-bottom:4px;">${escapeHtml(g.name || 'Group')}</div>
@@ -1047,12 +1053,12 @@ function renderEnter(){
   if(!state.players.length) return `<div class="empty-state">Add players in Setup first.</div>`;
   const visRounds = state.rounds.filter(r=>r.visible!==false);
   if(!visRounds.length) return `<div class="empty-state">No rounds are visible yet. Check back once the organizer opens one up.</div>`;
-
-  const myGroup = myTeeGroup();
-  if(myGroup === undefined) return renderGroupPicker();
-
   if(!visRounds.some(r=>r.id===entrySel.round)) entrySel.round = visRounds[0].id;
   const round = getRound(entrySel.round);
+
+  const myGroup = myTeeGroup(round);
+  if(myGroup === undefined) return renderGroupPicker(round, visRounds);
+
   const allowedPlayers = myGroup ? sortedPlayers().filter(p=>myGroup.players.includes(p.name)) : sortedPlayers();
   if(myGroup && !allowedPlayers.some(p=>p.name===entrySel.player)){
     entrySel.player = allowedPlayers.length ? allowedPlayers[0].name : '';
@@ -1136,26 +1142,6 @@ function renderSetup(){
     <button class="btn secondary" id="addPlayer">Add Player</button>
   </div>`;
 
-  html += `<h2 class="section-title">Tee Groups (who can enter scores for whom)</h2>
-  <div class="card">
-    <p class="muted" style="margin-top:0;">Each phone picks one group in Enter Scores. Once picked, that phone can only enter scores for the 4 players in that group — this cuts down on accidental cross-entry, not a strict security lock.</p>
-    <button class="btn secondary" id="copyR1Quads">Copy Groups from Round 1 Foursomes</button>
-  </div>
-  <div class="card">`;
-  (state.teeGroups||[]).forEach((tg, ti)=>{
-    html += `<div class="group-box">
-      <div class="group-label">${escapeHtml(tg.name || `Group ${ti+1}`)} <button class="remove-x" data-remove-teegroup="${ti}" style="float:right;">&times;</button></div>
-      <input type="text" data-teegroup-name="${ti}" value="${escapeAttr(tg.name || '')}" placeholder="Group name (e.g. Group 1)" style="margin-bottom:8px;">
-      ${[0,1,2,3].map(slot=>`
-        <select data-teegroup-slot="${ti}:${slot}">
-          <option value="">— select player —</option>
-          ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${tg.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
-        </select>
-      `).join('')}
-    </div>`;
-  });
-  html += `<button class="btn secondary" id="addTeeGroup">Add Group</button></div>`;
-
   state.rounds.forEach((round, ri)=>{
     const isVisible = round.visible !== false;
     html += `<h2 class="section-title">${escapeHtml(round.label)} ${isVisible ? '' : '<span class="tag">HIDDEN</span>'}</h2>
@@ -1179,6 +1165,27 @@ function renderSetup(){
       <label>Longest Drive holes (comma-separated)</label>
       <input type="text" data-round-ldholes="${round.id}" value="${(round.ldHoles||[]).join(', ')}" placeholder="e.g. 8, 16">
     </div>
+    <details data-details-key="${round.id}-teegroups" ${uiDetailsState[`${round.id}-teegroups`] ? 'open' : ''}>
+      <summary>Tee Groups for ${escapeHtml(round.label)} (who can enter scores for whom)</summary>
+      <div class="card">
+        <p class="muted" style="margin-top:0;">Each phone picks one group here for this round. Groups reset per round, so today's foursomes don't carry over to a different day's mix.</p>
+        ${round.format==='sixes' ? `<button class="btn secondary" data-copy-quads-to-teegroups="${round.id}">Copy from this Round's Foursomes</button>` : ''}
+      </div>
+      <div class="card">
+        ${(round.teeGroups||[]).map((tg, ti)=>`
+          <div class="group-box">
+            <div class="group-label">${escapeHtml(tg.name || `Group ${ti+1}`)} <button class="remove-x" data-remove-teegroup="${round.id}:${ti}" style="float:right;">&times;</button></div>
+            <input type="text" data-teegroup-name="${round.id}:${ti}" value="${escapeAttr(tg.name || '')}" placeholder="Group name (e.g. Group 1)" style="margin-bottom:8px;">
+            ${[0,1,2,3].map(slot=>`
+              <select data-teegroup-slot="${round.id}:${ti}:${slot}">
+                <option value="">— select player —</option>
+                ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${tg.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+              </select>
+            `).join('')}
+          </div>`).join('')}
+        <button class="btn secondary" data-add-teegroup="${round.id}">Add Group</button>
+      </div>
+    </details>
     <details data-details-key="${round.id}-scorecard" ${uiDetailsState[`${round.id}-scorecard`] ? 'open' : ''}>
       <summary>Scorecard — Par &amp; Stroke Index (18 holes)</summary>
       <div class="card">
@@ -1293,17 +1300,20 @@ function attachHandlers(){
   }
 
   if(currentTab==='enter'){
+    const pickerRoundSelect = document.getElementById('pickerRoundSelect');
+    if(pickerRoundSelect) pickerRoundSelect.onchange = e=>{ entrySel.round = e.target.value; render(); };
+
     document.querySelectorAll('[data-pick-teegroup]').forEach(btn=>{
       btn.onclick = ()=>{
-        localStorage.setItem('myTeeGroupId', btn.dataset.pickTeegroup);
+        localStorage.setItem(`myTeeGroupId_${entrySel.round}`, btn.dataset.pickTeegroup);
         entrySel.player = '';
         render();
       };
     });
     const switchGroupBtn = document.getElementById('switchGroupBtn');
     if(switchGroupBtn) switchGroupBtn.onclick = ()=>{
-      if(!confirm('Switch to a different foursome on this phone?')) return;
-      localStorage.removeItem('myTeeGroupId');
+      if(!confirm('Switch to a different foursome for this round on this phone?')) return;
+      localStorage.removeItem(`myTeeGroupId_${entrySel.round}`);
       render();
     };
 
@@ -1357,43 +1367,48 @@ function attachHandlers(){
       await saveState(); render();
     };
 
-    const copyR1QuadsBtn = document.getElementById('copyR1Quads');
-    if(copyR1QuadsBtn) copyR1QuadsBtn.onclick = async ()=>{
-      const r1 = getRound('r1');
-      const validQuads = (r1.quads||[]).filter(q=>q.players.filter(Boolean).length===4);
-      if(!validQuads.length){
-        alert('Round 1 foursomes aren\'t set up yet — use "Load Round 1 Roster & Matchups" first, or build your Tee Groups manually below.');
-        return;
-      }
-      state.teeGroups = validQuads.map((q,i)=>({
-        id: 'teegroup-' + Date.now() + '-' + i,
-        name: `Group ${i+1}`,
-        players: q.players.slice()
-      }));
-      await saveState(); render();
-    };
-    const addTeeGroupBtn = document.getElementById('addTeeGroup');
-    if(addTeeGroupBtn) addTeeGroupBtn.onclick = async ()=>{
-      state.teeGroups.push({ id: 'teegroup-' + Date.now(), name: `Group ${state.teeGroups.length+1}`, players:['','','',''] });
-      await saveState(); render();
-    };
+    document.querySelectorAll('[data-copy-quads-to-teegroups]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const round = getRound(btn.dataset.copyQuadsToTeegroups);
+        const validQuads = (round.quads||[]).filter(q=>q.players.filter(Boolean).length===4);
+        if(!validQuads.length){
+          alert('This round\'s foursomes aren\'t set up yet — use "Load Round 1 Roster & Matchups" first, or build Tee Groups manually below.');
+          return;
+        }
+        round.teeGroups = validQuads.map((q,i)=>({
+          id: 'teegroup-' + Date.now() + '-' + i,
+          name: `Group ${i+1}`,
+          players: q.players.slice()
+        }));
+        await saveState(); render();
+      };
+    });
+    document.querySelectorAll('[data-add-teegroup]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const round = getRound(btn.dataset.addTeegroup);
+        round.teeGroups.push({ id: 'teegroup-' + Date.now(), name: `Group ${round.teeGroups.length+1}`, players:['','','',''] });
+        await saveState(); render();
+      };
+    });
     document.querySelectorAll('[data-remove-teegroup]').forEach(btn=>{
       btn.onclick = async ()=>{
         if(!confirm('Remove this tee group?')) return;
-        state.teeGroups.splice(Number(btn.dataset.removeTeegroup),1);
+        const [rid, ti] = btn.dataset.removeTeegroup.split(':');
+        getRound(rid).teeGroups.splice(Number(ti),1);
         await saveState(); render();
       };
     });
     document.querySelectorAll('[data-teegroup-name]').forEach(inp=>{
       inp.onchange = async ()=>{
-        state.teeGroups[Number(inp.dataset.teegroupName)].name = inp.value;
+        const [rid, ti] = inp.dataset.teegroupName.split(':');
+        getRound(rid).teeGroups[Number(ti)].name = inp.value;
         await saveState(); render();
       };
     });
     document.querySelectorAll('[data-teegroup-slot]').forEach(sel=>{
       sel.onchange = async ()=>{
-        const [ti, slot] = sel.dataset.teegroupSlot.split(':');
-        state.teeGroups[Number(ti)].players[Number(slot)] = sel.value;
+        const [rid, ti, slot] = sel.dataset.teegroupSlot.split(':');
+        getRound(rid).teeGroups[Number(ti)].players[Number(slot)] = sel.value;
         await saveState(); render();
       };
     });
