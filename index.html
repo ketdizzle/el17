@@ -383,6 +383,59 @@
   }
   .hole-row-status.show{ opacity:1; }
   .hole-row-status.error{ color: var(--red-over); }
+  .hole-row{ flex-wrap: wrap; }
+  .hole-extra{
+    flex-basis: 100%;
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    margin-top: 6px;
+    padding-left: 32px;
+    font-size: 12px;
+    color: var(--amber-dim);
+    font-family:'Oswald',sans-serif;
+  }
+  .hole-extra input[type=number]{
+    width: 54px;
+    padding: 6px 4px;
+    margin: 0;
+    text-align:center;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+  }
+  .hole-extra label{
+    display:flex;
+    align-items:center;
+    gap: 5px;
+    margin:0;
+    font-size: 13px;
+    color: var(--cream);
+    opacity:0.85;
+    cursor:pointer;
+  }
+  .hole-extra input[type=checkbox]{
+    width:16px; height:16px; margin:0;
+  }
+  .kp-ld-card{
+    display:flex;
+    flex-direction:column;
+    gap: 10px;
+  }
+  .kp-ld-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding: 6px 2px;
+  }
+  .kp-ld-label{
+    font-family:'Oswald',sans-serif;
+    font-size: 12px;
+    color: var(--amber-dim);
+  }
+  .kp-ld-value{
+    font-size: 14px;
+    text-align:right;
+  }
   .lb-score-wrap{
     display:flex;
     flex-direction:row;
@@ -457,6 +510,13 @@ let pollTimer = null;
 // Tracks open/closed state of <details> sections across re-renders (not persisted to backend, per-browser only).
 const uiDetailsState = {};
 
+// Which holes are Closest-to-Pin / Longest-Drive contests, per round.
+const ROUND_KP_LD_DEFAULTS = {
+  r1: { kp:[4,13], ld:[8,16] },
+  r2: { kp:[4,16], ld:[5,12] },
+  r3: { kp:[8,12], ld:[7,17] }
+};
+
 function blankHoles(n){ return Array.from({length:n}, ()=>null); }
 
 function defaultState(){
@@ -468,22 +528,27 @@ function defaultState(){
         id:'r1', label:'Round 1', course:'Twin Warriors', date:'',
         format:'sixes', visible: true,
         par: KNOWN_SCORECARDS['Twin Warriors'].par.slice(), hcpIndex: KNOWN_SCORECARDS['Twin Warriors'].hcpIndex.slice(),
-        groups: [], quads: [], pairs: []
+        groups: [], quads: [], pairs: [],
+        kpHoles: ROUND_KP_LD_DEFAULTS.r1.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r1.ld.slice()
       },
       {
         id:'r2', label:'Round 2', course:'Paako Ridge', date:'',
         format:'pairs', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
-        groups: [], quads: [], pairs: []
+        groups: [], quads: [], pairs: [],
+        kpHoles: ROUND_KP_LD_DEFAULTS.r2.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r2.ld.slice()
       },
       {
         id:'r3', label:'Round 3', course:'Sandia Resort', date:'',
         format:'stroke', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
-        groups: [], quads: [], pairs: []
+        groups: [], quads: [], pairs: [],
+        kpHoles: ROUND_KP_LD_DEFAULTS.r3.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r3.ld.slice()
       }
     ],
-    scores: {} // key `${roundId}__${player}__${hole}` -> strokes (number)
+    scores: {}, // key `${roundId}__${player}__${hole}` -> strokes (number)
+    kp: {},     // key `${roundId}__${player}__${hole}` -> {feet, inches}
+    ld: {}      // key `${roundId}__${player}__${hole}` -> {checked, ts}
   };
 }
 
@@ -581,9 +646,13 @@ function normalizeState(s){
     hcpIndex: Array.isArray(r.hcpIndex) && r.hcpIndex.length===18 ? r.hcpIndex : blankHolesLocal18(),
     groups: Array.isArray(r.groups) ? r.groups : [],
     quads: Array.isArray(r.quads) ? r.quads : [],
-    pairs: Array.isArray(r.pairs) ? r.pairs : []
+    pairs: Array.isArray(r.pairs) ? r.pairs : [],
+    kpHoles: Array.isArray(r.kpHoles) ? r.kpHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].kp.slice()) || []),
+    ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || [])
   }));
   if(!s.scores || typeof s.scores !== 'object') s.scores = {};
+  if(!s.kp || typeof s.kp !== 'object') s.kp = {};
+  if(!s.ld || typeof s.ld !== 'object') s.ld = {};
   if(!s.name) s.name = 'Golf Tournament';
   return s;
 }
@@ -610,6 +679,8 @@ async function saveState(){
 function getRound(id){ return state.rounds.find(r=>r.id===id); }
 function sortedPlayers(){ return [...state.players].sort((a,b)=>a.name.localeCompare(b.name)); }
 function scoreKey(roundId, player, hole){ return `${roundId}__${player}__${hole}`; }
+function kpKey(roundId, player, hole){ return `${roundId}__${player}__${hole}`; }
+function ldKey(roundId, player, hole){ return `${roundId}__${player}__${hole}`; }
 function getScore(roundId, player, hole){
   const v = state.scores[scoreKey(roundId, player, hole)];
   return (v===undefined || v===null || v==='') ? null : Number(v);
@@ -722,6 +793,38 @@ function pairsTotalsForRound(roundId){
     results.push({ id: pair.id || `pair-${pi}`, label: `${a} & ${b}`, total, count });
   });
   return results;
+}
+
+// --- Daily Closest-to-Pin: all entries across the round's KP holes, sorted shortest-first ---
+function kpLeaderboardForRound(roundId){
+  const round = getRound(roundId);
+  const entries = [];
+  (round.kpHoles||[]).forEach(hole=>{
+    state.players.forEach(p=>{
+      const e = state.kp[kpKey(roundId, p.name, hole)];
+      if(!e) return;
+      const feet = (e.feet===null || e.feet===undefined || e.feet==='') ? null : Number(e.feet);
+      const inches = (e.inches===null || e.inches===undefined || e.inches==='') ? null : Number(e.inches);
+      if(feet===null && inches===null) return;
+      const total = (feet||0)*12 + (inches||0);
+      entries.push({ player: p.name, hole, feet: feet||0, inches: inches||0, total });
+    });
+  });
+  return entries.sort((a,b)=> a.total - b.total);
+}
+
+// --- Daily Longest Drive: most recently checked "LD?" box across the round's LD holes ---
+function ldLeaderboardForRound(roundId){
+  const round = getRound(roundId);
+  let best = null;
+  (round.ldHoles||[]).forEach(hole=>{
+    state.players.forEach(p=>{
+      const e = state.ld[ldKey(roundId, p.name, hole)];
+      if(!e || !e.checked) return;
+      if(!best || (e.ts||0) > (best.ts||0)) best = { player: p.name, hole, ts: e.ts||0 };
+    });
+  });
+  return best;
 }
 
 function render(){
@@ -848,7 +951,34 @@ function renderLeaderboard(){
         <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`;
     }
 
+    const kpEntries = kpLeaderboardForRound(round.id);
+    const ldBest = ldLeaderboardForRound(round.id);
+    const hasKpLd = (round.kpHoles||[]).length > 0 || (round.ldHoles||[]).length > 0;
+    let kpLdHtml = '';
+    if(hasKpLd){
+      const ldValue = ldBest
+        ? `${escapeHtml(ldBest.player)} (Hole ${ldBest.hole})`
+        : '<span class="muted">No entries yet</span>';
+      kpLdHtml = `<h2 class="section-title">Daily KP and LD</h2>
+        <div class="card kp-ld-card">
+          <div class="kp-ld-row">
+            <span class="kp-ld-label">LONGEST DRIVE</span>
+            <span class="kp-ld-value">${ldValue}</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="kp-ld-label" style="margin-bottom:8px;">CLOSEST TO PIN — ALL ENTRIES</div>
+          ${kpEntries.length ? kpEntries.map((e,i)=>`
+            <div class="lb-row">
+              <span class="lb-rank">${i+1}</span>
+              <span class="lb-name">${escapeHtml(e.player)} <span class="tag">Hole ${e.hole}</span></span>
+              <span class="lb-score">${e.feet}' ${e.inches}"</span>
+            </div>`).join('') : `<div class="muted">No entries yet</div>`}
+        </div>`;
+    }
+
     return tabs + `
+      ${kpLdHtml}
       ${pairsHtml}
       <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
       <div class="card">${gross.map((r,i)=>`
@@ -882,6 +1012,25 @@ function renderEnter(){
   for(let h=1; h<=18; h++){
     const existing = getScore(round.id, entrySel.player, h);
     const par = round.par[h-1];
+    const isKp = (round.kpHoles||[]).includes(h);
+    const isLd = (round.ldHoles||[]).includes(h);
+    let extraHtml = '';
+    if(isKp){
+      const kpEntry = state.kp[kpKey(round.id, entrySel.player, h)] || {};
+      extraHtml += `<div class="hole-extra">
+        <span>KP</span>
+        <input type="number" inputmode="numeric" data-kp-feet="${h}" placeholder="ft" value="${kpEntry.feet!==undefined && kpEntry.feet!==null?kpEntry.feet:''}">
+        <span>ft</span>
+        <input type="number" inputmode="numeric" data-kp-inches="${h}" placeholder="in" value="${kpEntry.inches!==undefined && kpEntry.inches!==null?kpEntry.inches:''}">
+        <span>in</span>
+      </div>`;
+    }
+    if(isLd){
+      const ldEntry = state.ld[ldKey(round.id, entrySel.player, h)] || {};
+      extraHtml += `<div class="hole-extra">
+        <label><input type="checkbox" data-ld-check="${h}" ${ldEntry.checked?'checked':''}> LD?</label>
+      </div>`;
+    }
     rows += `
       <div class="hole-row" data-hole-row="${h}">
         <span class="hole-row-num">${h}</span>
@@ -889,6 +1038,7 @@ function renderEnter(){
         <input type="number" inputmode="numeric" class="hole-row-input" data-live-hole="${h}" value="${existing!==null?existing:''}" placeholder="-">
         <button class="clear-x" data-clear-hole="${h}" title="Clear" style="${existing!==null?'':'visibility:hidden;'}">&times;</button>
         <span class="hole-row-status" data-status-hole="${h}"></span>
+        ${extraHtml}
       </div>`;
   }
 
@@ -953,6 +1103,10 @@ function renderSetup(){
         <input type="checkbox" data-round-visible="${round.id}" ${isVisible?'checked':''} style="width:16px; height:16px; margin:0;">
         Visible to players (Board &amp; Enter Scores)
       </label>
+      <label style="margin-top:12px;">Closest to Pin holes (comma-separated)</label>
+      <input type="text" data-round-kpholes="${round.id}" value="${(round.kpHoles||[]).join(', ')}" placeholder="e.g. 4, 13">
+      <label>Longest Drive holes (comma-separated)</label>
+      <input type="text" data-round-ldholes="${round.id}" value="${(round.ldHoles||[]).join(', ')}" placeholder="e.g. 8, 16">
     </div>
     <details data-details-key="${round.id}-scorecard" ${uiDetailsState[`${round.id}-scorecard`] ? 'open' : ''}>
       <summary>Scorecard — Par &amp; Stroke Index (18 holes)</summary>
@@ -1091,6 +1245,16 @@ function attachHandlers(){
         scheduleHoleSave(hole, '', true);
       };
     });
+
+    document.querySelectorAll('[data-kp-feet]').forEach(inp=>{
+      inp.oninput = ()=> scheduleKpSave(Number(inp.dataset.kpFeet), 'feet', inp.value);
+    });
+    document.querySelectorAll('[data-kp-inches]').forEach(inp=>{
+      inp.oninput = ()=> scheduleKpSave(Number(inp.dataset.kpInches), 'inches', inp.value);
+    });
+    document.querySelectorAll('[data-ld-check]').forEach(cb=>{
+      cb.onchange = ()=> saveLdCheck(Number(cb.dataset.ldCheck), cb.checked);
+    });
   }
 
   if(currentTab==='setup'){
@@ -1133,6 +1297,15 @@ function attachHandlers(){
     });
     document.querySelectorAll('[data-round-visible]').forEach(cb=>{
       cb.onchange = async ()=>{ getRound(cb.dataset.roundVisible).visible = cb.checked; await saveState(); render(); };
+    });
+    function parseHoleList(str){
+      return str.split(',').map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n) && n>=1 && n<=18);
+    }
+    document.querySelectorAll('[data-round-kpholes]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundKpholes).kpHoles = parseHoleList(inp.value); await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-ldholes]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundLdholes).ldHoles = parseHoleList(inp.value); await saveState(); render(); };
     });
     document.querySelectorAll('[data-par]').forEach(inp=>{
       inp.onchange = async ()=>{
@@ -1297,6 +1470,44 @@ function scheduleHoleSave(hole, rawValue, immediate){
   };
   if(immediate){ doSave(); }
   else { saveTimers[key] = setTimeout(doSave, 600); }
+}
+
+function scheduleKpSave(hole, field, rawValue){
+  const round = entrySel.round, player = entrySel.player;
+  const timerKey = `kp__${round}__${player}__${hole}__${field}`;
+  if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
+  saveTimers[timerKey] = setTimeout(async ()=>{
+    if(rawValue !== '' && isNaN(Number(rawValue))){
+      flashHoleStatus(hole, 'Invalid', true);
+      return;
+    }
+    try{
+      const latest = await backendGet();
+      if(latest) state = normalizeState(latest);
+      const k = kpKey(round, player, hole);
+      if(!state.kp[k]) state.kp[k] = { feet: null, inches: null };
+      state.kp[k][field] = rawValue === '' ? null : Number(rawValue);
+      await saveState();
+      flashHoleStatus(hole, 'Saved');
+    }catch(e){
+      flashHoleStatus(hole, 'Failed', true);
+    }
+  }, 600);
+}
+
+async function saveLdCheck(hole, checked){
+  const round = entrySel.round, player = entrySel.player;
+  try{
+    const latest = await backendGet();
+    if(latest) state = normalizeState(latest);
+    const k = ldKey(round, player, hole);
+    const prevTs = state.ld[k] ? state.ld[k].ts : null;
+    state.ld[k] = { checked, ts: checked ? Date.now() : prevTs };
+    await saveState();
+    flashHoleStatus(hole, checked ? 'LD set' : 'Cleared');
+  }catch(e){
+    flashHoleStatus(hole, 'Failed', true);
+  }
 }
 
 function exportToExcel(){
