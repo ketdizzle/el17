@@ -454,6 +454,8 @@ let currentTab = 'leaderboard';
 let lbView = 'overall'; // overall | r1 | r2 | r3
 let entrySel = { round: 'r1', player: '', hole: 1 };
 let pollTimer = null;
+// Tracks open/closed state of <details> sections across re-renders (not persisted to backend, per-browser only).
+const uiDetailsState = {};
 
 function blankHoles(n){ return Array.from({length:n}, ()=>null); }
 
@@ -606,6 +608,7 @@ async function saveState(){
 }
 
 function getRound(id){ return state.rounds.find(r=>r.id===id); }
+function sortedPlayers(){ return [...state.players].sort((a,b)=>a.name.localeCompare(b.name)); }
 function scoreKey(roundId, player, hole){ return `${roundId}__${player}__${hole}`; }
 function getScore(roundId, player, hole){
   const v = state.scores[scoreKey(roundId, player, hole)];
@@ -898,7 +901,7 @@ function renderEnter(){
       </select>
       <label>Player</label>
       <select id="playerSelect">
-        ${state.players.map(p=>`<option value="${escapeAttr(p.name)}" ${p.name===entrySel.player?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+        ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${p.name===entrySel.player?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
     </div>
     <div class="card hole-list">
@@ -951,7 +954,7 @@ function renderSetup(){
         Visible to players (Board &amp; Enter Scores)
       </label>
     </div>
-    <details>
+    <details data-details-key="${round.id}-scorecard" ${uiDetailsState[`${round.id}-scorecard`] ? 'open' : ''}>
       <summary>Scorecard — Par &amp; Stroke Index (18 holes)</summary>
       <div class="card">
         ${KNOWN_SCORECARDS[round.course] ? `<button class="btn secondary" data-autofill-card="${round.id}">Autofill ${escapeHtml(round.course)} Card</button>` : ''}
@@ -968,7 +971,9 @@ function renderSetup(){
     </details>`;
 
     if(round.format==='sixes'){
-      html += `<details open><summary>Foursomes for ${escapeHtml(round.label)} (rotating 1-on-1, net score, 2/1/0 per hole)</summary><div class="card">`;
+      const quadsKey = `${round.id}-quads`;
+      if(!(quadsKey in uiDetailsState)) uiDetailsState[quadsKey] = true;
+      html += `<details data-details-key="${quadsKey}" ${uiDetailsState[quadsKey] ? 'open' : ''}><summary>Foursomes for ${escapeHtml(round.label)} (rotating 1-on-1, net score, 2/1/0 per hole)</summary><div class="card">`;
       html += `<button class="btn secondary" data-autofill-quads="${round.id}" style="margin-bottom:12px;">Load Round 1 Roster &amp; Matchups</button>`;
       (round.quads||[]).forEach((quad, qi)=>{
         const filled = quad.players.filter(Boolean).length === 4;
@@ -977,7 +982,7 @@ function renderSetup(){
           ${[0,1,2,3].map(slot=>`
             <select data-quad-slot="${round.id}:${qi}:${slot}">
               <option value="">— select player —</option>
-              ${state.players.map(p=>`<option value="${escapeAttr(p.name)}" ${quad.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+              ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${quad.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
             </select>
           `).join('')}
           <label style="margin-top:8px;">Matchup schedule</label>
@@ -999,14 +1004,16 @@ function renderSetup(){
     }
 
     if(round.format==='pairs'){
-      html += `<details open><summary>Pairs for ${escapeHtml(round.label)} (team best-ball gross + net)</summary><div class="card">`;
+      const pairsKey = `${round.id}-pairs`;
+      if(!(pairsKey in uiDetailsState)) uiDetailsState[pairsKey] = true;
+      html += `<details data-details-key="${pairsKey}" ${uiDetailsState[pairsKey] ? 'open' : ''}><summary>Pairs for ${escapeHtml(round.label)} (team best-ball gross + net)</summary><div class="card">`;
       (round.pairs||[]).forEach((pair, pi)=>{
         html += `<div class="group-box">
           <div class="group-label">Pair ${pi+1} <button class="remove-x" data-remove-pair="${round.id}:${pi}" style="float:right;">&times;</button></div>
           ${[0,1].map(slot=>`
             <select data-pair-slot="${round.id}:${pi}:${slot}">
               <option value="">— select player —</option>
-              ${state.players.map(p=>`<option value="${escapeAttr(p.name)}" ${pair.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+              ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${pair.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
             </select>
           `).join('')}
         </div>`;
@@ -1048,6 +1055,10 @@ function attachHandlers(){
       currentTab = tab;
       render();
     };
+  });
+
+  document.querySelectorAll('[data-details-key]').forEach(el=>{
+    el.ontoggle = ()=>{ uiDetailsState[el.dataset.detailsKey] = el.open; };
   });
 
   if(currentTab==='leaderboard'){
