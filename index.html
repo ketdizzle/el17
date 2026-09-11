@@ -524,6 +524,7 @@ let state = null;
 let currentTab = 'leaderboard';
 let lbView = 'overall'; // overall | r1 | r2 | r3
 let entrySel = { round: 'r1', player: '', hole: 1 };
+let entryMode = 'player'; // 'player' | 'hole'
 let pollTimer = null;
 // Tracks open/closed state of <details> sections across re-renders (not persisted to backend, per-browser only).
 const uiDetailsState = {};
@@ -924,6 +925,14 @@ function renderLeaderboard(){
         </div>`).join('')}
       </div>
       <p class="muted">Net = gross minus handicap strokes allocated per hole. To-par shows once par is entered for every hole played, in Setup.</p>
+      <h2 class="section-title">Handicaps</h2>
+      <div class="card">${[...state.players].sort((a,b)=> (Number(a.handicap)||0) - (Number(b.handicap)||0)).map((p,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${i+1}</span>
+          <span class="lb-name">${escapeHtml(p.name)}</span>
+          <span class="lb-score">${Number(p.handicap)||0}</span>
+        </div>`).join('')}
+      </div>
     `;
   } else {
     const round = getRound(lbView);
@@ -1064,15 +1073,37 @@ function renderEnter(){
     entrySel.player = allowedPlayers.length ? allowedPlayers[0].name : '';
   }
 
+  const modeToggle = `<div class="toplevel-tabs">
+    <button data-entry-mode="player" class="${entryMode==='player'?'active':''}">BY PLAYER</button>
+    <button data-entry-mode="hole" class="${entryMode==='hole'?'active':''}">BY HOLE</button>
+  </div>`;
+
+  const roundPicker = `
+    <div class="card">
+      <label>Round</label>
+      <select id="roundSelect">
+        ${visRounds.map(r=>`<option value="${r.id}" ${r.id===round.id?'selected':''}>${escapeHtml(r.label)} — ${escapeHtml(r.course)}</option>`).join('')}
+      </select>
+      ${myGroup ? `<button class="btn secondary" id="switchGroupBtn" style="margin-top:4px;">Not ${escapeHtml(myGroup.name || 'this group')}? Switch group</button>` : ''}
+    </div>`;
+
+  if(entryMode === 'hole'){
+    return modeToggle + roundPicker + renderEnterByHole(round, allowedPlayers, myGroup);
+  }
+  return modeToggle + roundPicker + renderEnterByPlayer(round, allowedPlayers);
+}
+
+function renderEnterByPlayer(round, allowedPlayers){
+  const player = entrySel.player;
   let rows = '';
   for(let h=1; h<=18; h++){
-    const existing = getScore(round.id, entrySel.player, h);
+    const existing = getScore(round.id, player, h);
     const par = round.par[h-1];
     const isKp = (round.kpHoles||[]).includes(h);
     const isLd = (round.ldHoles||[]).includes(h);
     let extraHtml = '';
     if(isKp){
-      const kpEntry = state.kp[kpKey(round.id, entrySel.player, h)] || {};
+      const kpEntry = state.kp[kpKey(round.id, player, h)] || {};
       extraHtml += `<div class="hole-extra">
         <span>KP</span>
         <input type="number" inputmode="numeric" data-kp-feet="${h}" placeholder="ft" value="${kpEntry.feet!==undefined && kpEntry.feet!==null?kpEntry.feet:''}">
@@ -1082,7 +1113,7 @@ function renderEnter(){
       </div>`;
     }
     if(isLd){
-      const ldEntry = state.ld[ldKey(round.id, entrySel.player, h)] || {};
+      const ldEntry = state.ld[ldKey(round.id, player, h)] || {};
       extraHtml += `<div class="hole-extra">
         <label><input type="checkbox" data-ld-check="${h}" ${ldEntry.checked?'checked':''}> LD?</label>
       </div>`;
@@ -1093,26 +1124,74 @@ function renderEnter(){
         <span class="hole-row-par">${par ? `Par ${par}` : ''}</span>
         <input type="number" inputmode="numeric" class="hole-row-input" data-live-hole="${h}" value="${existing!==null?existing:''}" placeholder="-">
         <button class="clear-x" data-clear-hole="${h}" title="Clear" style="${existing!==null?'':'visibility:hidden;'}">&times;</button>
-        <span class="hole-row-status" data-status-hole="${h}"></span>
+        <span class="hole-row-status" data-status-key="${player}__${h}"></span>
         ${extraHtml}
       </div>`;
   }
 
   return `
-    <h2 class="section-title">Enter Scores</h2>
     <div class="card">
-      <label>Round</label>
-      <select id="roundSelect">
-        ${visRounds.map(r=>`<option value="${r.id}" ${r.id===round.id?'selected':''}>${escapeHtml(r.label)} — ${escapeHtml(r.course)}</option>`).join('')}
-      </select>
       <label>Player</label>
       <select id="playerSelect">
-        ${allowedPlayers.map(p=>`<option value="${escapeAttr(p.name)}" ${p.name===entrySel.player?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+        ${allowedPlayers.map(p=>`<option value="${escapeAttr(p.name)}" ${p.name===player?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
-      ${myGroup ? `<button class="btn secondary" id="switchGroupBtn" style="margin-top:4px;">Not ${escapeHtml(myGroup.name || 'this group')}? Switch group</button>` : ''}
     </div>
     <div class="card hole-list">
       ${rows}
+    </div>
+    <p class="muted">Scores save automatically as you type — no need to press anything.</p>
+  `;
+}
+
+function renderEnterByHole(round, allowedPlayers, myGroup){
+  if(!entrySel.hole || entrySel.hole < 1 || entrySel.hole > 18) entrySel.hole = 1;
+  const hole = entrySel.hole;
+  const par = round.par[hole-1];
+  const isKp = (round.kpHoles||[]).includes(hole);
+  const isLd = (round.ldHoles||[]).includes(hole);
+
+  const rows = allowedPlayers.map(p=>{
+    const existing = getScore(round.id, p.name, hole);
+    let extraHtml = '';
+    if(isKp){
+      const kpEntry = state.kp[kpKey(round.id, p.name, hole)] || {};
+      extraHtml += `<div class="hole-extra">
+        <span>KP</span>
+        <input type="number" inputmode="numeric" data-kp-feet-player="${escapeAttr(p.name)}" placeholder="ft" value="${kpEntry.feet!==undefined && kpEntry.feet!==null?kpEntry.feet:''}">
+        <span>ft</span>
+        <input type="number" inputmode="numeric" data-kp-inches-player="${escapeAttr(p.name)}" placeholder="in" value="${kpEntry.inches!==undefined && kpEntry.inches!==null?kpEntry.inches:''}">
+        <span>in</span>
+      </div>`;
+    }
+    if(isLd){
+      const ldEntry = state.ld[ldKey(round.id, p.name, hole)] || {};
+      extraHtml += `<div class="hole-extra">
+        <label><input type="checkbox" data-ld-check-player="${escapeAttr(p.name)}" ${ldEntry.checked?'checked':''}> LD?</label>
+      </div>`;
+    }
+    return `
+      <div class="hole-row" data-hole-row-player="${escapeAttr(p.name)}">
+        <span class="hole-row-num" style="width:auto; flex:1; text-align:left; font-family:'IBM Plex Sans',sans-serif; font-size:15px; color:var(--cream);">${escapeHtml(p.name)}</span>
+        <input type="number" inputmode="numeric" class="hole-row-input" style="flex:0 0 70px;" data-live-player="${escapeAttr(p.name)}" value="${existing!==null?existing:''}" placeholder="-">
+        <button class="clear-x" data-clear-player="${escapeAttr(p.name)}" title="Clear" style="${existing!==null?'':'visibility:hidden;'}">&times;</button>
+        <span class="hole-row-status" data-status-key="${p.name}__${hole}"></span>
+        ${extraHtml}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <button class="btn secondary" id="prevHoleBtn" style="width:auto; padding:10px 16px;" ${hole<=1?'disabled':''}>&larr; Prev</button>
+        <div style="text-align:center;">
+          <div style="font-family:'Oswald',sans-serif; font-size:24px; color:var(--amber);">Hole ${hole}</div>
+          <div class="muted">${par ? `Par ${par}` : ''}</div>
+        </div>
+        <button class="btn secondary" id="nextHoleBtn" style="width:auto; padding:10px 16px;" ${hole>=18?'disabled':''}>Next &rarr;</button>
+      </div>
+    </div>
+    <div class="card hole-list">
+      ${allowedPlayers.length ? rows : `<div class="empty-state">${myGroup ? 'No players in your group.' : 'No players yet.'}</div>`}
     </div>
     <p class="muted">Scores save automatically as you type — no need to press anything.</p>
   `;
@@ -1126,13 +1205,16 @@ function renderSetup(){
   </div>`;
 
   html += `<h2 class="section-title">Players &amp; Handicaps (${state.players.length})</h2><div class="card">`;
-  state.players.forEach((p,i)=>{
-    html += `<div class="list-item">
-      <span>${escapeHtml(p.name)}</span>
-      <input type="number" data-hcp-index="${i}" value="${p.handicap}" step="1">
-      <button class="remove-x" data-remove-player="${i}">&times;</button>
-    </div>`;
-  });
+  state.players
+    .map((p,i)=>({p,i})) // keep original index for handlers before sorting for display
+    .sort((a,b)=> a.p.name.localeCompare(b.p.name))
+    .forEach(({p,i})=>{
+      html += `<div class="list-item">
+        <span>${escapeHtml(p.name)}</span>
+        <input type="number" data-hcp-index="${i}" value="${p.handicap}" step="1">
+        <button class="remove-x" data-remove-player="${i}">&times;</button>
+      </div>`;
+    });
   html += `</div>
   <div class="card">
     <div class="row-flex">
@@ -1317,38 +1399,74 @@ function attachHandlers(){
       render();
     };
 
+    document.querySelectorAll('[data-entry-mode]').forEach(btn=>{
+      btn.onclick = ()=>{ entryMode = btn.dataset.entryMode; render(); };
+    });
+
     const roundSelect = document.getElementById('roundSelect');
     const playerSelect = document.getElementById('playerSelect');
     if(roundSelect) roundSelect.onchange = e=>{ entrySel.round=e.target.value; render(); };
     if(playerSelect) playerSelect.onchange = e=>{ entrySel.player=e.target.value; render(); };
 
+    const prevHoleBtn = document.getElementById('prevHoleBtn');
+    const nextHoleBtn = document.getElementById('nextHoleBtn');
+    if(prevHoleBtn) prevHoleBtn.onclick = ()=>{ if(entrySel.hole>1){ entrySel.hole--; render(); } };
+    if(nextHoleBtn) nextHoleBtn.onclick = ()=>{ if(entrySel.hole<18){ entrySel.hole++; render(); } };
+
+    // By-player mode: one player fixed, looping over all 18 holes
     document.querySelectorAll('[data-live-hole]').forEach(input=>{
       input.oninput = ()=>{
         const hole = Number(input.dataset.liveHole);
         const clearBtn = document.querySelector(`[data-clear-hole="${hole}"]`);
         if(clearBtn) clearBtn.style.visibility = input.value==='' ? 'hidden' : 'visible';
-        scheduleHoleSave(hole, input.value);
+        scheduleHoleSave(entrySel.round, entrySel.player, hole, input.value);
       };
     });
-
     document.querySelectorAll('[data-clear-hole]').forEach(btn=>{
       btn.onclick = ()=>{
         const hole = Number(btn.dataset.clearHole);
         const input = document.querySelector(`[data-live-hole="${hole}"]`);
         if(input) input.value = '';
         btn.style.visibility = 'hidden';
-        scheduleHoleSave(hole, '', true);
+        scheduleHoleSave(entrySel.round, entrySel.player, hole, '', true);
       };
     });
-
     document.querySelectorAll('[data-kp-feet]').forEach(inp=>{
-      inp.oninput = ()=> scheduleKpSave(Number(inp.dataset.kpFeet), 'feet', inp.value);
+      inp.oninput = ()=> scheduleKpSave(entrySel.round, entrySel.player, Number(inp.dataset.kpFeet), 'feet', inp.value);
     });
     document.querySelectorAll('[data-kp-inches]').forEach(inp=>{
-      inp.oninput = ()=> scheduleKpSave(Number(inp.dataset.kpInches), 'inches', inp.value);
+      inp.oninput = ()=> scheduleKpSave(entrySel.round, entrySel.player, Number(inp.dataset.kpInches), 'inches', inp.value);
     });
     document.querySelectorAll('[data-ld-check]').forEach(cb=>{
-      cb.onchange = ()=> saveLdCheck(Number(cb.dataset.ldCheck), cb.checked);
+      cb.onchange = ()=> saveLdCheck(entrySel.round, entrySel.player, Number(cb.dataset.ldCheck), cb.checked);
+    });
+
+    // By-hole mode: one hole fixed, looping over all players in the group
+    document.querySelectorAll('[data-live-player]').forEach(input=>{
+      input.oninput = ()=>{
+        const player = input.dataset.livePlayer;
+        const clearBtn = document.querySelector(`[data-clear-player="${CSS.escape(player)}"]`);
+        if(clearBtn) clearBtn.style.visibility = input.value==='' ? 'hidden' : 'visible';
+        scheduleHoleSave(entrySel.round, player, entrySel.hole, input.value);
+      };
+    });
+    document.querySelectorAll('[data-clear-player]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const player = btn.dataset.clearPlayer;
+        const input = document.querySelector(`[data-live-player="${CSS.escape(player)}"]`);
+        if(input) input.value = '';
+        btn.style.visibility = 'hidden';
+        scheduleHoleSave(entrySel.round, player, entrySel.hole, '', true);
+      };
+    });
+    document.querySelectorAll('[data-kp-feet-player]').forEach(inp=>{
+      inp.oninput = ()=> scheduleKpSave(entrySel.round, inp.dataset.kpFeetPlayer, entrySel.hole, 'feet', inp.value);
+    });
+    document.querySelectorAll('[data-kp-inches-player]').forEach(inp=>{
+      inp.oninput = ()=> scheduleKpSave(entrySel.round, inp.dataset.kpInchesPlayer, entrySel.hole, 'inches', inp.value);
+    });
+    document.querySelectorAll('[data-ld-check-player]').forEach(cb=>{
+      cb.onchange = ()=> saveLdCheck(entrySel.round, cb.dataset.ldCheckPlayer, entrySel.hole, cb.checked);
     });
   }
 
@@ -1578,8 +1696,8 @@ function attachHandlers(){
 
 const saveTimers = {};
 
-function flashHoleStatus(hole, text, isError){
-  const el = document.querySelector(`[data-status-hole="${hole}"]`);
+function flashStatus(statusKey, text, isError){
+  const el = document.querySelector(`[data-status-key="${statusKey}"]`);
   if(!el) return;
   el.textContent = text;
   el.classList.toggle('error', !!isError);
@@ -1588,13 +1706,13 @@ function flashHoleStatus(hole, text, isError){
   el._fadeTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1200);
 }
 
-function scheduleHoleSave(hole, rawValue, immediate){
-  const round = entrySel.round, player = entrySel.player;
-  const key = `${round}__${player}__${hole}`;
-  if(saveTimers[key]) clearTimeout(saveTimers[key]);
+function scheduleHoleSave(round, player, hole, rawValue, immediate){
+  const statusKey = `${player}__${hole}`;
+  const timerKey = `${round}__${player}__${hole}`;
+  if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
   const doSave = async ()=>{
     if(rawValue !== '' && isNaN(Number(rawValue))){
-      flashHoleStatus(hole, 'Invalid', true);
+      flashStatus(statusKey, 'Invalid', true);
       return;
     }
     try{
@@ -1604,22 +1722,22 @@ function scheduleHoleSave(hole, rawValue, immediate){
       if(rawValue === ''){ delete state.scores[k]; }
       else { state.scores[k] = Number(rawValue); }
       await saveState();
-      flashHoleStatus(hole, rawValue==='' ? 'Cleared' : 'Saved');
+      flashStatus(statusKey, rawValue==='' ? 'Cleared' : 'Saved');
     }catch(e){
-      flashHoleStatus(hole, 'Failed', true);
+      flashStatus(statusKey, 'Failed', true);
     }
   };
   if(immediate){ doSave(); }
-  else { saveTimers[key] = setTimeout(doSave, 600); }
+  else { saveTimers[timerKey] = setTimeout(doSave, 600); }
 }
 
-function scheduleKpSave(hole, field, rawValue){
-  const round = entrySel.round, player = entrySel.player;
+function scheduleKpSave(round, player, hole, field, rawValue){
+  const statusKey = `${player}__${hole}`;
   const timerKey = `kp__${round}__${player}__${hole}__${field}`;
   if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
   saveTimers[timerKey] = setTimeout(async ()=>{
     if(rawValue !== '' && isNaN(Number(rawValue))){
-      flashHoleStatus(hole, 'Invalid', true);
+      flashStatus(statusKey, 'Invalid', true);
       return;
     }
     try{
@@ -1629,15 +1747,15 @@ function scheduleKpSave(hole, field, rawValue){
       if(!state.kp[k]) state.kp[k] = { feet: null, inches: null };
       state.kp[k][field] = rawValue === '' ? null : Number(rawValue);
       await saveState();
-      flashHoleStatus(hole, 'Saved');
+      flashStatus(statusKey, 'Saved');
     }catch(e){
-      flashHoleStatus(hole, 'Failed', true);
+      flashStatus(statusKey, 'Failed', true);
     }
   }, 600);
 }
 
-async function saveLdCheck(hole, checked){
-  const round = entrySel.round, player = entrySel.player;
+async function saveLdCheck(round, player, hole, checked){
+  const statusKey = `${player}__${hole}`;
   try{
     const latest = await backendGet();
     if(latest) state = normalizeState(latest);
@@ -1645,9 +1763,9 @@ async function saveLdCheck(hole, checked){
     const prevTs = state.ld[k] ? state.ld[k].ts : null;
     state.ld[k] = { checked, ts: checked ? Date.now() : prevTs };
     await saveState();
-    flashHoleStatus(hole, checked ? 'LD set' : 'Cleared');
+    flashStatus(statusKey, checked ? 'LD set' : 'Cleared');
   }catch(e){
-    flashHoleStatus(hole, 'Failed', true);
+    flashStatus(statusKey, 'Failed', true);
   }
 }
 
