@@ -60,6 +60,13 @@
     border-bottom: 1px solid var(--board-line);
     background: linear-gradient(180deg, var(--board-alt), var(--board));
   }
+  #tournamentImage{
+    width: 100%;
+    max-height: 140px;
+    object-fit: cover;
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
   header .eyebrow{
     font-family:'Oswald',sans-serif;
     letter-spacing: 0.04em;
@@ -476,6 +483,7 @@
 <body>
 <div id="app">
   <header>
+    <img id="tournamentImage" src="" alt="" style="display:none;">
     <p class="eyebrow">LIVE SCOREBOARD</p>
     <h1 id="tournamentName">Tournament</h1>
     <p class="sub" id="headerSub">loading...</p>
@@ -541,12 +549,14 @@ function blankHoles(n){ return Array.from({length:n}, ()=>null); }
 function defaultState(){
   return {
     name: 'Golf Tournament',
+    tournamentImageUrl: '',
     players: Array.from({length:16}, (_,i)=>({ name:`Player ${i+1}`, handicap: 0 })),
     rounds: [
       {
         id:'r1', label:'Round 1', course:'Twin Warriors', date:'',
         format:'sixes', visible: true,
         par: KNOWN_SCORECARDS['Twin Warriors'].par.slice(), hcpIndex: KNOWN_SCORECARDS['Twin Warriors'].hcpIndex.slice(),
+        rating: 69.9, slope: 133, logoUrl: '',
         groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r1.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r1.ld.slice()
       },
@@ -554,6 +564,7 @@ function defaultState(){
         id:'r2', label:'Round 2', course:'Paako Ridge', date:'',
         format:'pairs', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
+        rating: 69.7, slope: 132, logoUrl: '',
         groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r2.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r2.ld.slice()
       },
@@ -561,6 +572,7 @@ function defaultState(){
         id:'r3', label:'Round 3', course:'Sandia Resort', date:'',
         format:'stroke', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
+        rating: 69.8, slope: 129, logoUrl: '',
         groups: [], quads: [], pairs: [], teeGroups: [],
         kpHoles: ROUND_KP_LD_DEFAULTS.r3.kp.slice(), ldHoles: ROUND_KP_LD_DEFAULTS.r3.ld.slice()
       }
@@ -646,6 +658,8 @@ async function backendSet(stateObj){
 
 function blankHolesLocal18(){ return Array.from({length:18}, ()=>null); }
 
+const ROUND_RATING_SLOPE_DEFAULTS = { r1:{rating:69.9, slope:133}, r2:{rating:69.7, slope:132}, r3:{rating:69.8, slope:129} };
+
 function normalizeState(s){
   if(!s || typeof s !== 'object') return defaultState();
   if(!Array.isArray(s.players)) s.players = [];
@@ -661,6 +675,8 @@ function normalizeState(s){
     date: r.date || '',
     format: r.format || 'stroke',
     visible: r.visible !== false,
+    rating: (r.rating !== undefined && r.rating !== null && r.rating !== '') ? Number(r.rating) : ((ROUND_RATING_SLOPE_DEFAULTS[r.id] && ROUND_RATING_SLOPE_DEFAULTS[r.id].rating) || null),
+    slope: (r.slope !== undefined && r.slope !== null && r.slope !== '') ? Number(r.slope) : ((ROUND_RATING_SLOPE_DEFAULTS[r.id] && ROUND_RATING_SLOPE_DEFAULTS[r.id].slope) || null),
     par: Array.isArray(r.par) && r.par.length===18 ? r.par : blankHolesLocal18(),
     hcpIndex: Array.isArray(r.hcpIndex) && r.hcpIndex.length===18 ? r.hcpIndex : blankHolesLocal18(),
     groups: Array.isArray(r.groups) ? r.groups : [],
@@ -668,12 +684,14 @@ function normalizeState(s){
     pairs: Array.isArray(r.pairs) ? r.pairs : [],
     teeGroups: Array.isArray(r.teeGroups) ? r.teeGroups : [],
     kpHoles: Array.isArray(r.kpHoles) ? r.kpHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].kp.slice()) || []),
-    ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || [])
+    ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || []),
+    logoUrl: r.logoUrl || ''
   }));
   if(!s.scores || typeof s.scores !== 'object') s.scores = {};
   if(!s.kp || typeof s.kp !== 'object') s.kp = {};
   if(!s.ld || typeof s.ld !== 'object') s.ld = {};
   if(!s.name) s.name = 'Golf Tournament';
+  if(!s.tournamentImageUrl) s.tournamentImageUrl = '';
   return s;
 }
 
@@ -715,6 +733,18 @@ function strokesReceived(handicap, hcpIndexOfHole){
   return base + (hcpIndexOfHole <= remainder ? 1 : 0);
 }
 
+// Converts a player's Handicap Index into a Course Handicap for a specific round,
+// using the standard formula: Index × (Slope / 113) + (Rating − Par).
+// Falls back to treating the entered handicap as-is if rating/slope aren't set.
+function courseHandicap(round, handicapIndex){
+  const idx = Number(handicapIndex) || 0;
+  const rating = Number(round.rating);
+  const slope = Number(round.slope);
+  const par = round.par && round.par.length ? round.par.reduce((a,b)=>a+(Number(b)||0),0) : 0;
+  if(!rating || !slope || !par) return idx; // not enough course data yet — use index directly
+  return Math.round(idx * (slope/113) + (rating - par));
+}
+
 function roundGrossTotal(roundId, player){
   const round = getRound(roundId);
   let total=0, count=0, parSum=0, parCount=0;
@@ -733,13 +763,14 @@ function roundGrossTotal(roundId, player){
 function roundNetTotal(roundId, player){
   const round = getRound(roundId);
   const p = state.players.find(pl=>pl.name===player);
-  const hcp = p ? Number(p.handicap)||0 : 0;
+  const idx = p ? Number(p.handicap)||0 : 0;
+  const hcp = courseHandicap(round, idx);
   let total=0, count=0, parSum=0, parCount=0;
   for(let h=1; h<=18; h++){
     const v = getScore(roundId, player, h);
     if(v!==null){
-      const idx = round.hcpIndex[h-1];
-      total += v - strokesReceived(hcp, idx ? Number(idx) : null);
+      const hi = round.hcpIndex[h-1];
+      total += v - strokesReceived(hcp, hi ? Number(hi) : null);
       count++;
       const par = round.par[h-1];
       if(par!==null && par!==undefined && par!==''){ parSum += Number(par); parCount++; }
@@ -765,9 +796,10 @@ function netHoleScore(round, player, hole){
   const gross = getScore(round.id, player, hole);
   if(gross===null) return null;
   const p = state.players.find(pl=>pl.name===player);
-  const hcp = p ? Number(p.handicap)||0 : 0;
-  const idx = round.hcpIndex[hole-1];
-  return gross - strokesReceived(hcp, idx ? Number(idx) : null);
+  const idx = p ? Number(p.handicap)||0 : 0;
+  const hcp = courseHandicap(round, idx);
+  const hi = round.hcpIndex[hole-1];
+  return gross - strokesReceived(hcp, hi ? Number(hi) : null);
 }
 
 function sixesTotalsForRound(roundId){
@@ -851,6 +883,14 @@ function render(){
   document.getElementById('tournamentName').textContent = state.name;
   const roundsInfo = state.rounds.map(r=>r.course).join(' · ');
   document.getElementById('headerSub').textContent = `${state.players.length} players · ${roundsInfo}`;
+  const imgEl = document.getElementById('tournamentImage');
+  if(state.tournamentImageUrl){
+    imgEl.src = state.tournamentImageUrl;
+    imgEl.alt = state.name;
+    imgEl.style.display = 'block';
+  } else {
+    imgEl.style.display = 'none';
+  }
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===currentTab));
   const main = document.getElementById('main');
   if(currentTab==='leaderboard') main.innerHTML = renderLeaderboard();
@@ -1005,7 +1045,12 @@ function renderLeaderboard(){
         </div>`;
     }
 
+    const logoHtml = round.logoUrl
+      ? `<div style="text-align:center; margin-bottom:16px;"><img src="${escapeAttr(round.logoUrl)}" alt="${escapeAttr(round.course)}" style="max-height:90px; max-width:100%; border-radius:6px;"></div>`
+      : '';
+
     return tabs + `
+      ${logoHtml}
       ${kpLdHtml}
       ${pairsHtml}
       <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
@@ -1202,6 +1247,12 @@ function renderSetup(){
   <div class="card">
     <input type="text" id="nameInput" value="${escapeAttr(state.name)}" autocomplete="off" autocorrect="off">
     <button class="btn secondary" id="saveName">Update Name</button>
+  </div>
+  <div class="card">
+    <label>Tournament Banner Image URL</label>
+    <input type="text" id="tournamentImageInput" value="${escapeAttr(state.tournamentImageUrl||'')}" placeholder="e.g. images/trip-banner.jpg" autocomplete="off" autocorrect="off">
+    <button class="btn secondary" id="saveTournamentImage">Update Banner</button>
+    <p class="muted" style="margin-top:10px;">Upload the image file to your GitHub repo (e.g. in an "images" folder next to index.html), then enter its filename or full URL here. Shows at the top of every page.</p>
   </div>`;
 
   html += `<h2 class="section-title">Players &amp; Handicaps (${state.players.length})</h2><div class="card">`;
@@ -1230,6 +1281,8 @@ function renderSetup(){
     <div class="card">
       <label>Course</label>
       <input type="text" data-round-course="${round.id}" value="${escapeAttr(round.course)}" autocomplete="off" autocorrect="off">
+      <label>Course Logo Image URL</label>
+      <input type="text" data-round-logo="${round.id}" value="${escapeAttr(round.logoUrl||'')}" placeholder="e.g. images/twin-warriors-logo.png" autocomplete="off" autocorrect="off">
       <label>Date (optional, TBD is fine)</label>
       <input type="text" data-round-date="${round.id}" value="${escapeAttr(round.date)}" placeholder="TBD">
       <label>Format</label>
@@ -1242,11 +1295,37 @@ function renderSetup(){
         <input type="checkbox" data-round-visible="${round.id}" ${isVisible?'checked':''} style="width:16px; height:16px; margin:0;">
         Visible to players (Board &amp; Enter Scores)
       </label>
-      <label style="margin-top:12px;">Closest to Pin holes (comma-separated)</label>
+      <div class="row-flex" style="margin-top:12px;">
+        <div>
+          <label>Course Rating</label>
+          <input type="number" step="0.1" data-round-rating="${round.id}" value="${round.rating!==null && round.rating!==undefined ? round.rating : ''}" placeholder="e.g. 69.9">
+        </div>
+        <div>
+          <label>Slope Rating</label>
+          <input type="number" data-round-slope="${round.id}" value="${round.slope!==null && round.slope!==undefined ? round.slope : ''}" placeholder="e.g. 133">
+        </div>
+      </div>
+      <p class="muted" style="margin:-4px 0 12px;">Used to convert each player's Handicap Index into a Course Handicap for this course: Index × (Slope/113) + (Rating − Par). Par is auto-summed from the scorecard below.</p>
+      <label>Closest to Pin holes (comma-separated)</label>
       <input type="text" data-round-kpholes="${round.id}" value="${(round.kpHoles||[]).join(', ')}" placeholder="e.g. 4, 13">
       <label>Longest Drive holes (comma-separated)</label>
       <input type="text" data-round-ldholes="${round.id}" value="${(round.ldHoles||[]).join(', ')}" placeholder="e.g. 8, 16">
     </div>
+    <details data-details-key="${round.id}-handicaps" ${uiDetailsState[`${round.id}-handicaps`] ? 'open' : ''}>
+      <summary>Course Handicaps for ${escapeHtml(round.label)} (Index → Calculated)</summary>
+      <div class="card">
+        ${sortedPlayers().map(p=>{
+          const idx = Number(p.handicap)||0;
+          const ch = courseHandicap(round, idx);
+          return `<div class="list-item">
+            <span>${escapeHtml(p.name)}</span>
+            <span class="muted">Index ${idx}</span>
+            <span style="font-family:'Oswald',sans-serif; color:var(--amber);">→ ${ch}</span>
+          </div>`;
+        }).join('')}
+        ${(!round.rating || !round.slope) ? `<p class="muted" style="margin-top:8px;">Rating/Slope not set — showing Handicap Index as-is until both are entered above.</p>` : ''}
+      </div>
+    </details>
     <details data-details-key="${round.id}-teegroups" ${uiDetailsState[`${round.id}-teegroups`] ? 'open' : ''}>
       <summary>Tee Groups for ${escapeHtml(round.label)} (who can enter scores for whom)</summary>
       <div class="card">
@@ -1476,6 +1555,11 @@ function attachHandlers(){
       state.name = document.getElementById('nameInput').value || 'Tournament';
       await saveState(); render();
     };
+    const saveTournamentImageBtn = document.getElementById('saveTournamentImage');
+    if(saveTournamentImageBtn) saveTournamentImageBtn.onclick = async ()=>{
+      state.tournamentImageUrl = document.getElementById('tournamentImageInput').value.trim();
+      await saveState(); render();
+    };
     const addPlayerBtn = document.getElementById('addPlayer');
     if(addPlayerBtn) addPlayerBtn.onclick = async ()=>{
       const name = document.getElementById('newPlayerInput').value.trim();
@@ -1548,6 +1632,9 @@ function attachHandlers(){
     document.querySelectorAll('[data-round-course]').forEach(inp=>{
       inp.onchange = async ()=>{ getRound(inp.dataset.roundCourse).course = inp.value; await saveState(); render(); };
     });
+    document.querySelectorAll('[data-round-logo]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundLogo).logoUrl = inp.value.trim(); await saveState(); render(); };
+    });
     document.querySelectorAll('[data-round-date]').forEach(inp=>{
       inp.onchange = async ()=>{ getRound(inp.dataset.roundDate).date = inp.value; await saveState(); };
     });
@@ -1556,6 +1643,12 @@ function attachHandlers(){
     });
     document.querySelectorAll('[data-round-visible]').forEach(cb=>{
       cb.onchange = async ()=>{ getRound(cb.dataset.roundVisible).visible = cb.checked; await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-rating]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundRating).rating = inp.value===''? null : Number(inp.value); await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-slope]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundSlope).slope = inp.value===''? null : Number(inp.value); await saveState(); render(); };
     });
     function parseHoleList(str){
       return str.split(',').map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n) && n>=1 && n<=18);
