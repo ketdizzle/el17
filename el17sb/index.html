@@ -687,22 +687,29 @@ async function backendSet(stateObj){
     return;
   }
   if(BACKEND.mode === 'firebase'){
-    // Attach the PIN hash the Database Rules check on every write.
+    // Attach the PIN hash the Database Rules check on every write. Firebase's
+    // REST API returns 401 for a rules rejection (sometimes 403 depending on
+    // the failure mode) — treat both as "wrong/stale PIN" and re-prompt.
+    const isAuthRejection = (status) => status === 401 || status === 403;
     let pinHash;
     try{ pinHash = await ensurePinHash(); }
-    catch(e){ throw new Error(e.message); }
+    catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
 
-    const payload = { ...stateObj, _pinHash: pinHash };
     let res = await fetch(BACKEND.firebaseUrl, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
     });
-    // Rules reject the write (403) if the cached hash is wrong/stale — clear it and re-prompt once.
-    if(res.status === 403){
+    let attempts = 1;
+    while(isAuthRejection(res.status) && attempts < 5){
       clearCachedPinHash();
-      pinHash = await ensurePinHash();
+      alert('Incorrect PIN. Please try again.');
+      try{ pinHash = await ensurePinHash(); }
+      catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
       res = await fetch(BACKEND.firebaseUrl, {
-        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
       });
+      attempts++;
     }
     if(!res.ok) throw new Error('firebase set failed: ' + res.status);
     return;
