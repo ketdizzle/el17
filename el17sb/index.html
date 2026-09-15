@@ -558,6 +558,7 @@ function defaultState(){
         format:'sixes', visible: true,
         par: KNOWN_SCORECARDS['Twin Warriors'].par.slice(), hcpIndex: KNOWN_SCORECARDS['Twin Warriors'].hcpIndex.slice(),
         rating: 69.9, slope: 133, logoUrl: '',
+        teeBox: '', firstTeeTime: '', totalYardage: '',
         useCourseHandicap: null, // null = inherit tournament default; true/false = override for this round
         handicapOverrides: {}, // { playerName: number } — per-round handicap adjustment, defaults to player's base handicap if unset
         groups: [], quads: [], pairs: [], teeGroups: [],
@@ -568,6 +569,7 @@ function defaultState(){
         format:'pairs', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
         rating: 69.7, slope: 132, logoUrl: '',
+        teeBox: '', firstTeeTime: '', totalYardage: '',
         useCourseHandicap: null,
         handicapOverrides: {},
         groups: [], quads: [], pairs: [], teeGroups: [],
@@ -578,6 +580,7 @@ function defaultState(){
         format:'stroke', visible: true,
         par: blankHoles(18), hcpIndex: blankHoles(18),
         rating: 69.8, slope: 129, logoUrl: '',
+        teeBox: '', firstTeeTime: '', totalYardage: '',
         useCourseHandicap: null,
         handicapOverrides: {},
         groups: [], quads: [], pairs: [], teeGroups: [],
@@ -756,6 +759,9 @@ function normalizeState(s){
     kpHoles: Array.isArray(r.kpHoles) ? r.kpHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].kp.slice()) || []),
     ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || []),
     logoUrl: r.logoUrl || '',
+    teeBox: r.teeBox || '',
+    firstTeeTime: r.firstTeeTime || '',
+    totalYardage: r.totalYardage || '',
     useCourseHandicap: (r.useCourseHandicap === true || r.useCourseHandicap === false) ? r.useCourseHandicap : null,
     handicapOverrides: (r.handicapOverrides && typeof r.handicapOverrides === 'object') ? r.handicapOverrides : {}
   }));
@@ -1143,8 +1149,24 @@ function renderLeaderboard(){
       ? `<div style="text-align:center; margin-bottom:16px;"><img src="${escapeAttr(round.logoUrl)}" alt="${escapeAttr(round.course)}" style="max-height:90px; max-width:100%; border-radius:6px;"></div>`
       : '';
 
+    const roundInfoParts = [];
+    if(round.course) roundInfoParts.push(escapeHtml(round.course));
+    if(round.teeBox) roundInfoParts.push(`${escapeHtml(round.teeBox)} tees`);
+    if(round.totalYardage) roundInfoParts.push(`${escapeHtml(round.totalYardage)} yds`);
+    if(round.rating !== null && round.rating !== undefined && round.slope !== null && round.slope !== undefined){
+      roundInfoParts.push(`${round.rating}/${round.slope}`);
+    }
+    const roundInfoLine1 = roundInfoParts.join(' · ');
+    const roundInfoLine2 = round.firstTeeTime ? `First tee: ${escapeHtml(round.firstTeeTime)}` : '';
+    const roundInfoHtml = (roundInfoLine1 || roundInfoLine2)
+      ? `<p class="muted" style="text-align:center; margin:-6px 0 14px;">
+          ${roundInfoLine1}${roundInfoLine1 && roundInfoLine2 ? '<br>' : ''}${roundInfoLine2}
+        </p>`
+      : '';
+
     return tabs + `
       ${logoHtml}
+      ${roundInfoHtml}
       ${kpLdHtml}
       ${pairsHtml}
       <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
@@ -1384,6 +1406,18 @@ function renderSetup(){
       <input type="text" data-round-course="${round.id}" value="${escapeAttr(round.course)}" autocomplete="off" autocorrect="off">
       <label>Course Logo Image URL</label>
       <input type="text" data-round-logo="${round.id}" value="${escapeAttr(round.logoUrl||'')}" placeholder="e.g. images/twin-warriors-logo.png" autocomplete="off" autocorrect="off">
+      <div class="row-flex">
+        <div>
+          <label>Tee Box</label>
+          <input type="text" data-round-teebox="${round.id}" value="${escapeAttr(round.teeBox||'')}" placeholder="e.g. White">
+        </div>
+        <div>
+          <label>First Tee Time</label>
+          <input type="text" data-round-teetime="${round.id}" value="${escapeAttr(round.firstTeeTime||'')}" placeholder="e.g. 8:10 AM">
+        </div>
+      </div>
+      <label>Total Yardage</label>
+      <input type="text" data-round-yardage="${round.id}" value="${escapeAttr(round.totalYardage||'')}" placeholder="e.g. 6412">
       <label>Date (optional, TBD is fine)</label>
       <input type="text" data-round-date="${round.id}" value="${escapeAttr(round.date)}" placeholder="TBD">
       <label>Format</label>
@@ -1745,6 +1779,15 @@ function attachHandlers(){
     });
     document.querySelectorAll('[data-round-logo]').forEach(inp=>{
       inp.onchange = async ()=>{ getRound(inp.dataset.roundLogo).logoUrl = inp.value.trim(); await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-teebox]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundTeebox).teeBox = inp.value.trim(); await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-teetime]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundTeetime).firstTeeTime = inp.value.trim(); await saveState(); render(); };
+    });
+    document.querySelectorAll('[data-round-yardage]').forEach(inp=>{
+      inp.onchange = async ()=>{ getRound(inp.dataset.roundYardage).totalYardage = inp.value.trim(); await saveState(); render(); };
     });
     document.querySelectorAll('[data-round-date]').forEach(inp=>{
       inp.onchange = async ()=>{ getRound(inp.dataset.roundDate).date = inp.value; await saveState(); };
