@@ -500,7 +500,7 @@
 const STORAGE_KEY = 'tournament-data-v2';
 
 // Change this to whatever PIN you want organizers to use to access Setup.
-const SETUP_PIN = '1234';
+const SETUP_PIN = '227424';
 
 const ROSTER_R1 = ['Surag','Niki','Woody','Sanjay','Ketal','Vikas','Shiv','Shaan','Samir','James','Parag','Ian','Roshan','Cham','Rishee','Archish'];
 
@@ -614,26 +614,68 @@ const BACKEND = {
   sheetsUrl: 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
 };
 
+// ============================================================
+// PIN-GATED WRITES (Firebase mode only — Spark/free plan, no server needed)
+//
+// The database itself never stores the PIN. Instead, every write includes a
+// SHA-256 hash of the PIN as a "_pinHash" field, and a Database Rule (see
+// database.rules.json) rejects any write whose hash doesn't match the one
+// you've configured. The PIN is entered once per browser and cached (as its
+// hash, not the raw PIN) in localStorage so friends aren't re-prompted.
+//
+// Threat model: this stops a random stranger who finds your database URL
+// from writing to it. It does NOT stop a friend who has the PIN (by design —
+// they're supposed to be able to write) from inspecting network traffic and
+// reusing the hash later. If that's ever a concern, rotate the PIN (change
+// it below and in your Database Rules) and everyone re-enters it.
+// ============================================================
+const TOURNAMENT_PIN_CACHE_KEY = 'tournamentPinHash';
+
+async function sha256Hex(text){
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+function getCachedPinHash(){
+  return localStorage.getItem(TOURNAMENT_PIN_CACHE_KEY) || null;
+}
+
+function clearCachedPinHash(){
+  localStorage.removeItem(TOURNAMENT_PIN_CACHE_KEY);
+}
+
+// Returns a PIN hash to attach to writes, prompting for the PIN if none is cached.
+async function ensurePinHash(){
+  const cached = getCachedPinHash();
+  if(cached) return cached;
+  const pin = prompt('Enter the tournament PIN to save changes:');
+  if(!pin) throw new Error('PIN required to save.');
+  const hash = await sha256Hex(pin.trim());
+  localStorage.setItem(TOURNAMENT_PIN_CACHE_KEY, hash);
+  return hash;
+}
+
 async function backendGet(){
   if(BACKEND.mode === 'rest'){
-    const res = await fetch(BACKEND.restUrl);
-    if(!res.ok) throw new Error('rest get failed: ' + res.status);
-    const data = await res.json();
-    return (data && Object.keys(data).length) ? data : null;
+    return fetchJsonOrNull(BACKEND.restUrl, {}, 'rest get');
   }
   if(BACKEND.mode === 'firebase'){
     const res = await fetch(BACKEND.firebaseUrl);
     if(!res.ok) throw new Error('firebase get failed: ' + res.status);
-    const data = await res.json();
-    return data || null;
+    return (await res.json()) || null;
   }
   if(BACKEND.mode === 'sheets'){
-    const res = await fetch(BACKEND.sheetsUrl + '?action=get');
-    if(!res.ok) throw new Error('sheets get failed: ' + res.status);
-    const data = await res.json();
-    return (data && Object.keys(data).length) ? data : null;
+    return fetchJsonOrNull(BACKEND.sheetsUrl + '?action=get', {}, 'sheets get');
   }
   throw new Error('Unknown BACKEND.mode: ' + BACKEND.mode);
+}
+
+async function fetchJsonOrNull(url, options, label){
+  const res = await fetch(url, options);
+  if(!res.ok) throw new Error(label + ' failed: ' + res.status);
+  const data = await res.json();
+  return (data && Object.keys(data).length) ? data : null;
 }
 
 async function backendSet(stateObj){
@@ -645,9 +687,23 @@ async function backendSet(stateObj){
     return;
   }
   if(BACKEND.mode === 'firebase'){
-    const res = await fetch(BACKEND.firebaseUrl, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(stateObj)
+    // Attach the PIN hash the Database Rules check on every write.
+    let pinHash;
+    try{ pinHash = await ensurePinHash(); }
+    catch(e){ throw new Error(e.message); }
+
+    const payload = { ...stateObj, _pinHash: pinHash };
+    let res = await fetch(BACKEND.firebaseUrl, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
     });
+    // Rules reject the write (403) if the cached hash is wrong/stale — clear it and re-prompt once.
+    if(res.status === 403){
+      clearCachedPinHash();
+      pinHash = await ensurePinHash();
+      res = await fetch(BACKEND.firebaseUrl, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
+      });
+    }
     if(!res.ok) throw new Error('firebase set failed: ' + res.status);
     return;
   }
@@ -702,6 +758,7 @@ function normalizeState(s){
   if(typeof s.useCourseHandicap !== 'boolean') s.useCourseHandicap = false;
   if(!s.name) s.name = 'Golf Tournament';
   if(!s.tournamentImageUrl) s.tournamentImageUrl = '';
+  delete s._pinHash; // written by the client for rule-checking only, not app data
   return s;
 }
 
@@ -1863,52 +1920,57 @@ function flashStatus(statusKey, text, isError){
   el._fadeTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1200);
 }
 
-function scheduleHoleSave(round, player, hole, rawValue, immediate){
-  const statusKey = `${player}__${hole}`;
-  const timerKey = `${round}__${player}__${hole}`;
+// Shared debounce-then-merge-then-save helper used by scheduleHoleSave and
+// scheduleKpSave: both need to wait for the user to stop typing, re-fetch the
+// latest state (so we don't clobber another device's concurrent edit), apply
+// one small mutation, then persist. Only the "apply mutation" step differs.
+function debounceMergeSave(timerKey, delayMs, statusKey, applyMutation){
   if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
   const doSave = async ()=>{
-    if(rawValue !== '' && isNaN(Number(rawValue))){
-      flashStatus(statusKey, 'Invalid', true);
-      return;
-    }
     try{
       const latest = await backendGet();
       if(latest) state = normalizeState(latest);
-      const k = scoreKey(round, player, hole);
-      if(rawValue === ''){ delete state.scores[k]; }
-      else { state.scores[k] = Number(rawValue); }
+      const { savedLabel } = applyMutation();
       await saveState();
-      flashStatus(statusKey, rawValue==='' ? 'Cleared' : 'Saved');
+      flashStatus(statusKey, savedLabel);
     }catch(e){
       flashStatus(statusKey, 'Failed', true);
     }
   };
-  if(immediate){ doSave(); }
-  else { saveTimers[timerKey] = setTimeout(doSave, 600); }
+  if(delayMs === 0){ doSave(); }
+  else { saveTimers[timerKey] = setTimeout(doSave, delayMs); }
+}
+
+function scheduleHoleSave(round, player, hole, rawValue, immediate){
+  const statusKey = `${player}__${hole}`;
+  const timerKey = `${round}__${player}__${hole}`;
+  if(rawValue !== '' && isNaN(Number(rawValue))){
+    if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
+    flashStatus(statusKey, 'Invalid', true);
+    return;
+  }
+  debounceMergeSave(timerKey, immediate ? 0 : 600, statusKey, ()=>{
+    const k = scoreKey(round, player, hole);
+    if(rawValue === ''){ delete state.scores[k]; }
+    else { state.scores[k] = Number(rawValue); }
+    return { savedLabel: rawValue === '' ? 'Cleared' : 'Saved' };
+  });
 }
 
 function scheduleKpSave(round, player, hole, field, rawValue){
   const statusKey = `${player}__${hole}`;
   const timerKey = `kp__${round}__${player}__${hole}__${field}`;
-  if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
-  saveTimers[timerKey] = setTimeout(async ()=>{
-    if(rawValue !== '' && isNaN(Number(rawValue))){
-      flashStatus(statusKey, 'Invalid', true);
-      return;
-    }
-    try{
-      const latest = await backendGet();
-      if(latest) state = normalizeState(latest);
-      const k = kpKey(round, player, hole);
-      if(!state.kp[k]) state.kp[k] = { feet: null, inches: null };
-      state.kp[k][field] = rawValue === '' ? null : Number(rawValue);
-      await saveState();
-      flashStatus(statusKey, 'Saved');
-    }catch(e){
-      flashStatus(statusKey, 'Failed', true);
-    }
-  }, 600);
+  if(rawValue !== '' && isNaN(Number(rawValue))){
+    if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
+    flashStatus(statusKey, 'Invalid', true);
+    return;
+  }
+  debounceMergeSave(timerKey, 600, statusKey, ()=>{
+    const k = kpKey(round, player, hole);
+    if(!state.kp[k]) state.kp[k] = { feet: null, inches: null };
+    state.kp[k][field] = rawValue === '' ? null : Number(rawValue);
+    return { savedLabel: 'Saved' };
+  });
 }
 
 async function saveLdCheck(round, player, hole, checked){
@@ -1992,7 +2054,9 @@ function exportToExcel(){
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
 }
-function escapeAttr(str){ return escapeHtml(str); }
+// escapeAttr is currently identical to escapeHtml (both contexts need the same
+// characters escaped); kept as a separate name so call sites document intent.
+const escapeAttr = escapeHtml;
 
 async function pollForUpdates(){
   if(currentTab==='setup' || currentTab==='enter') return;
