@@ -1159,7 +1159,7 @@ function renderLeaderboard(){
     const roundInfoLine1 = roundInfoParts.join(' · ');
     const roundInfoLine2 = round.firstTeeTime ? `First tee: ${escapeHtml(round.firstTeeTime)}` : '';
     const roundInfoHtml = (roundInfoLine1 || roundInfoLine2)
-      ? `<p class="muted" style="text-align:center; margin:-6px 0 14px;">
+      ? `<p style="text-align:center; margin:-6px 0 14px; font-size:1.05rem; font-weight:600; color:#ffffff;">
           ${roundInfoLine1}${roundInfoLine1 && roundInfoLine2 ? '<br>' : ''}${roundInfoLine2}
         </p>`
       : '';
@@ -1169,6 +1169,7 @@ function renderLeaderboard(){
       ${roundInfoHtml}
       ${kpLdHtml}
       ${pairsHtml}
+      ${sixesHtml}
       <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
       <div class="card">${gross.map((r,i)=>`
         <div class="lb-row">
@@ -1177,7 +1178,7 @@ function renderLeaderboard(){
           ${scoreCellHtml(r.count, r.total, r.toPar)}
         </div>`).join('')}
       </div>
-      <h2 class="section-title">${escapeHtml(round.label)} — Net</h2>
+      <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Net</h2>
       <div class="card">${net.map((r,i)=>`
         <div class="lb-row">
           <span class="lb-rank">${r.count===0?'–':i+1}</span>
@@ -1185,7 +1186,6 @@ function renderLeaderboard(){
           ${scoreCellHtml(r.count, r.total, r.toPar)}
         </div>`).join('')}
       </div>
-      ${sixesHtml}
     `;
   }
 }
