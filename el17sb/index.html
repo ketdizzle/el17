@@ -478,6 +478,13 @@
   .lb-topar.under{ color: var(--green-under); }
   .lb-topar.over{ color: var(--red-over); }
   .lb-topar.even{ color: var(--amber-dim); }
+  .lb-thru{
+    font-family:'Oswald',sans-serif;
+    font-size: 13px;
+    letter-spacing:0.02em;
+    color: var(--text-dim, #9aa0a6);
+    text-transform: uppercase;
+  }
 </style>
 </head>
 <body>
@@ -947,38 +954,6 @@ function pairsTotalsForRound(roundId){
   return results;
 }
 
-// --- Daily Closest-to-Pin: all entries across the round's KP holes, sorted shortest-first ---
-function kpLeaderboardForRound(roundId){
-  const round = getRound(roundId);
-  const entries = [];
-  (round.kpHoles||[]).forEach(hole=>{
-    state.players.forEach(p=>{
-      const e = state.kp[kpKey(roundId, p.name, hole)];
-      if(!e) return;
-      const feet = (e.feet===null || e.feet===undefined || e.feet==='') ? null : Number(e.feet);
-      const inches = (e.inches===null || e.inches===undefined || e.inches==='') ? null : Number(e.inches);
-      if(feet===null && inches===null) return;
-      const total = (feet||0)*12 + (inches||0);
-      entries.push({ player: p.name, hole, feet: feet||0, inches: inches||0, total });
-    });
-  });
-  return entries.sort((a,b)=> a.total - b.total);
-}
-
-// --- Daily Longest Drive: most recently checked "LD?" box across the round's LD holes ---
-function ldLeaderboardForRound(roundId){
-  const round = getRound(roundId);
-  let best = null;
-  (round.ldHoles||[]).forEach(hole=>{
-    state.players.forEach(p=>{
-      const e = state.ld[ldKey(roundId, p.name, hole)];
-      if(!e || !e.checked) return;
-      if(!best || (e.ts||0) > (best.ts||0)) best = { player: p.name, hole, ts: e.ts||0 };
-    });
-  });
-  return best;
-}
-
 function render(){
   document.getElementById('tournamentName').textContent = state.name;
   const roundsInfo = state.rounds.map(r=>r.course).join(' · ');
@@ -1010,7 +985,8 @@ function scoreCellHtml(count, total, toPar){
   const toParHtml = toPar!==null && toPar!==undefined
     ? `<span class="lb-topar ${toPar<0?'under':toPar>0?'over':'even'}">(${fmtSigned(toPar)})</span>`
     : '';
-  return `<span class="lb-score-wrap"><span class="lb-score">${total}</span>${toParHtml}</span>`;
+  const thruHtml = `<span class="lb-thru">${count>=18 ? 'F' : `Thru ${count}`}</span>`;
+  return `<span class="lb-score-wrap"><span class="lb-score">${total}</span>${toParHtml}${thruHtml}</span>`;
 }
 
 function renderLeaderboard(){
@@ -1119,30 +1095,46 @@ function renderLeaderboard(){
         <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`;
     }
 
-    const kpEntries = kpLeaderboardForRound(round.id);
-    const ldBest = ldLeaderboardForRound(round.id);
+    const kpByHole = (round.kpHoles||[]).map(hole=>{
+      const entries = state.players.map(p=>{
+        const e = state.kp[kpKey(round.id, p.name, hole)];
+        if(!e) return null;
+        const feet = (e.feet===null || e.feet===undefined || e.feet==='') ? null : Number(e.feet);
+        const inches = (e.inches===null || e.inches===undefined || e.inches==='') ? null : Number(e.inches);
+        if(feet===null && inches===null) return null;
+        return { player: p.name, feet: feet||0, inches: inches||0, total: (feet||0)*12 + (inches||0) };
+      }).filter(Boolean).sort((a,b)=>a.total-b.total);
+      return { hole, entries };
+    });
+    const ldByHole = (round.ldHoles||[]).map(hole=>{
+      const entries = state.players.map(p=>{
+        const e = state.ld[ldKey(round.id, p.name, hole)];
+        if(!e || !e.checked) return null;
+        return { player: p.name, ts: e.ts||0 };
+      }).filter(Boolean).sort((a,b)=>b.ts-a.ts); // most recently checked first (treated as current winner)
+      return { hole, entries };
+    });
     const hasKpLd = (round.kpHoles||[]).length > 0 || (round.ldHoles||[]).length > 0;
     let kpLdHtml = '';
     if(hasKpLd){
-      const ldValue = ldBest
-        ? `${escapeHtml(ldBest.player)} (Hole ${ldBest.hole})`
-        : '<span class="muted">No entries yet</span>';
       kpLdHtml = `<h2 class="section-title">Daily KP and LD</h2>
-        <div class="card kp-ld-card">
-          <div class="kp-ld-row">
-            <span class="kp-ld-label">LONGEST DRIVE</span>
-            <span class="kp-ld-value">${ldValue}</span>
-          </div>
-        </div>
-        <div class="card">
-          <div class="kp-ld-label" style="margin-bottom:8px;">CLOSEST TO PIN — ALL ENTRIES</div>
-          ${kpEntries.length ? kpEntries.map((e,i)=>`
-            <div class="lb-row">
-              <span class="lb-rank">${i+1}</span>
-              <span class="lb-name">${escapeHtml(e.player)} <span class="tag">Hole ${e.hole}</span></span>
-              <span class="lb-score">${e.feet}' ${e.inches}"</span>
-            </div>`).join('') : `<div class="muted">No entries yet</div>`}
-        </div>`;
+        ${ldByHole.map(({hole, entries})=>`
+          <div class="card kp-ld-card">
+            <div class="kp-ld-row">
+              <span class="kp-ld-label">LONGEST DRIVE — HOLE ${hole}</span>
+              <span class="kp-ld-value">${entries.length ? escapeHtml(entries[0].player) : '<span class="muted">No entries yet</span>'}</span>
+            </div>
+          </div>`).join('')}
+        ${kpByHole.map(({hole, entries})=>`
+          <div class="card">
+            <div class="kp-ld-label" style="margin-bottom:8px;">CLOSEST TO PIN — HOLE ${hole}</div>
+            ${entries.length ? entries.map((e,i)=>`
+              <div class="lb-row">
+                <span class="lb-rank">${i+1}</span>
+                <span class="lb-name">${escapeHtml(e.player)}</span>
+                <span class="lb-score">${e.feet}' ${e.inches}"</span>
+              </div>`).join('') : `<div class="muted">No entries yet</div>`}
+          </div>`).join('')}`;
     }
 
     const logoHtml = round.logoUrl
