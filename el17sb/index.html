@@ -842,8 +842,21 @@ async function loadState(){
 }
 
 async function saveState(){
-  try{ await backendSet(state); }
-  catch(e){ console.error('save failed', e); }
+  try{
+    await backendSet(state);
+  }catch(e){
+    console.error('save failed', e);
+    // The write was rejected (e.g. wrong/cancelled PIN). Whatever change was
+    // made to `state` in memory never actually reached the database, so pull
+    // the real server state back down and re-render — otherwise the failed
+    // edit keeps showing locally until the next unrelated page refresh.
+    try{
+      const serverState = await backendGet();
+      state = normalizeState(serverState);
+      render();
+    }catch(e2){ /* if this also fails, we'll self-correct on the next successful sync */ }
+    throw e; // let the caller know the save didn't happen (e.g. to show its own "Failed" status)
+  }
 }
 
 function getRound(id){ return state.rounds.find(r=>r.id===id); }
@@ -2022,15 +2035,8 @@ function debounceMergeSave(timerKey, delayMs, statusKey, applyMutation){
       await saveState();
       flashStatus(statusKey, savedLabel);
     }catch(e){
-      // The write was rejected (e.g. wrong/cancelled PIN) — the in-memory
-      // mutation above never actually made it to the database, so pull the
-      // real server state back down to revert the display instead of
-      // leaving the unsaved edit showing until the next page refresh.
-      try{
-        const serverState = await backendGet();
-        state = normalizeState(serverState);
-        render();
-      }catch(e2){ /* if this also fails, we'll self-correct on next successful sync */ }
+      // saveState() already reverted `state` to the real server value and
+      // re-rendered — this just updates the small per-field status label.
       flashStatus(statusKey, 'Failed', true);
     }
   };
