@@ -12,6 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <style>
   :root{
     --board:#16241C;
@@ -615,14 +617,38 @@ const BACKEND = {
   restUrl: 'http://localhost:3000/api/state',
 
   // --- mode: 'firebase' ---
-  // Your Realtime Database URL + a path, with .json appended, e.g.:
-  // https://your-project-default-rtdb.firebaseio.com/tournament.json
-  firebaseUrl: 'https://el17-abq-default-rtdb.firebaseio.com/tournament.json',
+  // Full Firebase web app config — from Firebase Console > Project settings >
+  // General > Your apps > (Web app) > SDK setup and configuration > Config.
+  // If you don't have a Web app registered yet, click "Add app" > Web (</>)
+  // in that screen first; it's free and doesn't require Blaze.
+  firebaseConfig: {
+    apiKey: 'YOUR_API_KEY',
+    authDomain: 'el17-abq.firebaseapp.com',
+    databaseURL: 'https://el17-abq-default-rtdb.firebaseio.com',
+    projectId: 'el17-abq',
+    appId: 'YOUR_APP_ID'
+  },
 
   // --- mode: 'sheets' ---
   // Your deployed Apps Script Web App URL (ends in /exec)
   sheetsUrl: 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
 };
+
+// ============================================================
+// FIREBASE SDK SETUP (real-time listener instead of REST polling)
+//
+// Using the actual Firebase SDK with a persistent WebSocket connection means
+// the browser downloads the full state once on load, then only the small
+// delta whenever something changes — instead of re-downloading the entire
+// state every few seconds via REST polling. This is the main lever for
+// staying well under the 360 MB/day free-tier download limit as more people
+// use the app during a round.
+// ============================================================
+let fbDb = null;
+if(BACKEND.mode === 'firebase'){
+  firebase.initializeApp(BACKEND.firebaseConfig);
+  fbDb = firebase.database();
+}
 
 // ============================================================
 // PIN-GATED WRITES (Firebase mode only — Spark/free plan, no server needed)
@@ -671,9 +697,8 @@ async function backendGet(){
     return fetchJsonOrNull(BACKEND.restUrl, {}, 'rest get');
   }
   if(BACKEND.mode === 'firebase'){
-    const res = await fetch(BACKEND.firebaseUrl);
-    if(!res.ok) throw new Error('firebase get failed: ' + res.status);
-    return (await res.json()) || null;
+    const snapshot = await fbDb.ref('tournament').once('value');
+    return snapshot.val() || null;
   }
   if(BACKEND.mode === 'sheets'){
     return fetchJsonOrNull(BACKEND.sheetsUrl + '?action=get', {}, 'sheets get');
@@ -697,32 +722,30 @@ async function backendSet(stateObj){
     return;
   }
   if(BACKEND.mode === 'firebase'){
-    // Attach the PIN hash the Database Rules check on every write. Firebase's
-    // REST API returns 401 for a rules rejection (sometimes 403 depending on
-    // the failure mode) — treat both as "wrong/stale PIN" and re-prompt.
-    const isAuthRejection = (status) => status === 401 || status === 403;
+    // Attach the PIN hash the Database Rules check on every write. The SDK
+    // rejects a denied write with an error whose .code is 'PERMISSION_DENIED'.
     let pinHash;
     try{ pinHash = await ensurePinHash(); }
     catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
 
-    let res = await fetch(BACKEND.firebaseUrl, {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
-    });
-    let attempts = 1;
-    while(isAuthRejection(res.status) && attempts < 5){
-      clearCachedPinHash();
-      alert('Incorrect PIN. Please try again.');
-      try{ pinHash = await ensurePinHash(); }
-      catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
-      res = await fetch(BACKEND.firebaseUrl, {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ ...stateObj, _pinHash: pinHash })
-      });
+    let attempts = 0;
+    while(attempts < 5){
       attempts++;
+      try{
+        await fbDb.ref('tournament').set({ ...stateObj, _pinHash: pinHash });
+        return;
+      }catch(err){
+        if(err && err.code === 'PERMISSION_DENIED'){
+          clearCachedPinHash();
+          alert('Incorrect PIN. Please try again.');
+          try{ pinHash = await ensurePinHash(); }
+          catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
+          continue;
+        }
+        throw err;
+      }
     }
-    if(!res.ok) throw new Error('firebase set failed: ' + res.status);
-    return;
+    throw new Error('firebase set failed: too many incorrect PIN attempts');
   }
   if(BACKEND.mode === 'sheets'){
     // Apps Script web apps need text/plain to avoid a CORS preflight.
@@ -783,6 +806,28 @@ function normalizeState(s){
 }
 
 async function loadState(){
+  if(BACKEND.mode === 'firebase'){
+    // Real-time listener: fires immediately with current data, then again
+    // only when something actually changes — no repeated polling needed.
+    return new Promise((resolve)=>{
+      let seeded = false, firstLoad = true;
+      fbDb.ref('tournament').on('value', async (snapshot)=>{
+        // Avoid clobbering in-progress typing: while the user is on Setup or
+        // Enter, those screens manage their own targeted reads/writes
+        // (see debounceMergeSave), so skip applying a full-state refresh here.
+        if(!firstLoad && (currentTab === 'setup' || currentTab === 'enter')) return;
+        const data = snapshot.val();
+        state = normalizeState(data);
+        if(!data && !seeded){
+          seeded = true;
+          try{ await saveState(); }catch(e){ console.error('initial save failed', e); }
+        }
+        if(!entrySel.player && state.players.length) entrySel.player = state.players[0].name;
+        render();
+        if(firstLoad){ firstLoad = false; resolve(); }
+      }, (err)=>{ console.error('firebase listener error', err); resolve(); });
+    });
+  }
   try{
     const data = await backendGet();
     state = normalizeState(data);
@@ -1068,7 +1113,7 @@ function renderLeaderboard(){
         .sort((a,b)=>b.pts-a.pts);
       const hasGroups = (round.quads||[]).some(q=>q.players.filter(Boolean).length===4);
       sixesHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points</h2>
-        <p class="muted" style="margin:-6px 0 12px;">(tiebreaker: lowest <strong>GROSS</strong> score will be used)</p>
+        <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
         <div class="card">
         ${hasGroups ? rows.map((r,i)=>`
           <div class="lb-row">
@@ -2116,7 +2161,9 @@ async function pollForUpdates(){
 }
 
 loadState();
-pollTimer = setInterval(pollForUpdates, 4000);
+if(BACKEND.mode !== 'firebase'){
+  pollTimer = setInterval(pollForUpdates, 4000);
+}
 </script>
 </body>
 </html>
