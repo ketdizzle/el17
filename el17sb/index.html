@@ -2022,6 +2022,15 @@ function debounceMergeSave(timerKey, delayMs, statusKey, applyMutation){
       await saveState();
       flashStatus(statusKey, savedLabel);
     }catch(e){
+      // The write was rejected (e.g. wrong/cancelled PIN) — the in-memory
+      // mutation above never actually made it to the database, so pull the
+      // real server state back down to revert the display instead of
+      // leaving the unsaved edit showing until the next page refresh.
+      try{
+        const serverState = await backendGet();
+        state = normalizeState(serverState);
+        render();
+      }catch(e2){ /* if this also fails, we'll self-correct on next successful sync */ }
       flashStatus(statusKey, 'Failed', true);
     }
   };
