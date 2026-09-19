@@ -14,6 +14,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <style>
   :root{
     --board:#16241C;
@@ -487,6 +488,101 @@
     color: var(--text-dim, #9aa0a6);
     text-transform: uppercase;
   }
+
+  /* ---- Password sign-in popup ---- */
+  .auth-overlay{
+    position:fixed; inset:0; z-index:1000;
+    background: rgba(10,18,13,0.82);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .auth-box{
+    width:100%; max-width:360px;
+    background: var(--board-alt);
+    border:1px solid var(--board-line);
+    border-top:3px solid var(--amber);
+    border-radius: var(--radius);
+    padding:20px 18px 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  }
+  .auth-title{
+    font-family:'Oswald',sans-serif;
+    font-size:20px; letter-spacing:0.02em;
+    color: var(--amber);
+    margin-bottom:6px;
+  }
+  .auth-msg{ font-size:13px; line-height:1.4; opacity:0.75; margin:0 0 14px; }
+  .auth-input{
+    width:100%;
+    background: var(--cream); color: var(--ink);
+    border:none; border-radius: var(--radius);
+    padding:12px; font-size:16px;
+    font-family:'IBM Plex Sans', sans-serif;
+    margin-bottom:8px;
+  }
+  .auth-error{ min-height:18px; font-size:12px; color:#E58A72; margin-bottom:10px; }
+  .auth-actions{ display:flex; gap:10px; }
+  .auth-actions .btn{ flex:1; }
+  /* ---------- CHAT TAB ---------- */
+  nav.tabs button{ position:relative; }
+  nav.tabs button.chat-unread:not(.active){ opacity:1; color: var(--amber); }
+  .chat-badge{
+    position:absolute; top:5px; left:50%; margin-left:12px;
+    min-width:16px; height:16px; padding:0 4px; border-radius:8px;
+    background: var(--red-over); color:#fff;
+    font-family:'Oswald',sans-serif; font-size:10px; line-height:16px; text-align:center;
+  }
+  .chat-badge[hidden]{ display:none; }
+  .chat-wrap{ position:relative; }
+  .chat-list{
+    height:50vh; height:50dvh; min-height:260px; max-height:520px;
+    overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
+    background: rgba(0,0,0,0.18);
+    border:1px solid var(--board-line); border-radius: var(--radius);
+    padding:10px; display:flex; flex-direction:column; gap:8px;
+  }
+  .chat-row{ display:flex; flex:0 0 auto; }
+  .chat-row.mine{ justify-content:flex-end; }
+  .chat-bubble{
+    max-width:82%;
+    background: var(--board-alt); border:1px solid var(--board-line);
+    border-radius:10px 10px 10px 2px; padding:7px 10px 8px;
+  }
+  .chat-row.mine .chat-bubble{
+    background: var(--amber); color: var(--ink); border-color:transparent;
+    border-radius:10px 10px 2px 10px;
+  }
+  .chat-meta{ display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
+  .chat-name{ font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.02em; font-weight:500; }
+  .chat-row.mine .chat-name{ color: var(--ink); opacity:0.75; }
+  .chat-time{ font-size:10px; opacity:0.5; white-space:nowrap; }
+  .chat-text{ font-size:15px; line-height:1.35; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
+  .chat-del{
+    margin-left:auto; background:none; border:none; padding:0 2px;
+    color: var(--red-over); font-size:18px; line-height:1; cursor:pointer;
+  }
+  .chat-row.mine .chat-del{ color: var(--ink); }
+  .chat-empty{ margin:auto; opacity:0.5; font-size:13px; text-align:center; }
+  .chat-newpill{
+    position:absolute; bottom:10px; left:50%; transform:translateX(-50%);
+    background: var(--amber); color: var(--ink); border:none; border-radius:999px;
+    padding:6px 14px; font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.02em;
+    box-shadow:0 2px 8px rgba(0,0,0,0.45); cursor:pointer;
+  }
+  .chat-newpill[hidden]{ display:none; }
+  .chat-status{ font-size:12px; color: var(--red-over); margin-bottom:8px; }
+  .chat-status[hidden]{ display:none; }
+  .chat-inputrow{ display:flex; gap:8px; align-items:stretch; margin-top:10px; }
+  .chat-inputrow input[type=text]{ flex:1; min-width:0; margin-bottom:0; }
+  .chat-inputrow .btn{ width:auto; padding:0 20px; }
+  .chat-as, .chat-foot{ font-size:12px; opacity:0.65; margin-top:10px; }
+  .chat-as{ margin-top:12px; }
+  .chat-join{ margin:12px 0 0; }
+  .chat-join .chat-inputrow{ margin-top:0; }
+  .chat-link{
+    background:none; border:none; padding:0; color: var(--amber);
+    font:inherit; text-decoration:underline; cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -501,6 +597,7 @@
   <nav class="tabs">
     <button data-tab="leaderboard" class="active">BOARD</button>
     <button data-tab="enter">ENTER</button>
+    <button data-tab="chat">CHAT<span class="chat-badge" id="chatBadge" hidden></span></button>
     <button data-tab="setup">SETUP</button>
   </nav>
 </div>
@@ -508,8 +605,10 @@
 <script>
 const STORAGE_KEY = 'tournament-data-v2';
 
-// Change this to whatever PIN you want organizers to use to access Setup.
-const SETUP_PIN = '227424';
+// Firebase Authentication accounts (create both in Firebase Console → Authentication → Users).
+// Only the EMAIL addresses live here — the passwords never appear in this file.
+const SCORER_EMAIL = 'el17@ellajore.golf';   // shared by everyone entering scores
+const ADMIN_EMAIL  = 'admin@ellajore.golf';   // organizer only — Setup tab and all settings changes
 
 const ROSTER_R1 = ['Surag','Niki','Woody','Sanjay','Ketal','Vikas','Shiv','Shaan','Samir','James','Parag','Ian','Roshan','Cham','Rishee','Archish'];
 
@@ -644,52 +743,173 @@ const BACKEND = {
 // staying well under the 360 MB/day free-tier download limit as more people
 // use the app during a round.
 // ============================================================
-let fbDb = null;
+let fbApp = null, fbDb = null, fbAuth = null;              // default app: public reads + scorer sign-in
+let fbAdminApp = null, fbAdminAuth = null;                  // second app: organizer sign-in (its database is opened on demand)
 if(BACKEND.mode === 'firebase'){
-  firebase.initializeApp(BACKEND.firebaseConfig);
-  fbDb = firebase.database();
+  fbApp = firebase.initializeApp(BACKEND.firebaseConfig);
+  fbDb = fbApp.database();
+  fbAuth = fbApp.auth();
+  fbAdminApp = firebase.initializeApp(BACKEND.firebaseConfig, 'admin');
+  fbAdminAuth = fbAdminApp.auth();
+  // Organizer session lasts only until this browser tab is closed.
+  fbAdminAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(()=>{});
 }
 
 // ============================================================
-// PIN-GATED WRITES (Firebase mode only — Spark/free plan, no server needed)
+// SIGN-IN & WRITE ACCESS (Firebase mode only — Spark/free plan, no server needed)
 //
-// The database itself never stores the PIN. Instead, every write includes a
-// SHA-256 hash of the PIN as a "_pinHash" field, and a Database Rule (see
-// database.rules.json) rejects any write whose hash doesn't match the one
-// you've configured. The PIN is entered once per browser and cached (as its
-// hash, not the raw PIN) in localStorage so friends aren't re-prompted.
+// Two Firebase Authentication accounts protect the database. Their passwords
+// are set in the Firebase Console and typed into the sign-in popup by people
+// — they are never stored in this file or in the database.
 //
-// Threat model: this stops a random stranger who finds your database URL
-// from writing to it. It does NOT stop a friend who has the PIN (by design —
-// they're supposed to be able to write) from inspecting network traffic and
-// reusing the hash later. If that's ever a concern, rotate the PIN (change
-// it below and in your Database Rules) and everyone re-enters it.
+//   SCORER_EMAIL  shared by everyone entering scores. The Database Rules let
+//                 it write ONLY scores, closest-to-pin and longest-drive.
+//   ADMIN_EMAIL   organizer only. The Database Rules let it write everything
+//                 (players, handicaps, rounds, settings, restore-from-backup).
+//
+// The Database Rules (database.rules.json) are the real gate. Anyone can read
+// this file, so the checks below only decide when to show the sign-in popup;
+// a visitor who skips them still cannot write anything. Reads stay public so
+// the leaderboard works without signing in.
+//
+// Two separate Firebase app instances are used so the scorer session stays
+// signed in on the device, while the organizer session ends when the browser
+// tab is closed.
 // ============================================================
-const TOURNAMENT_PIN_CACHE_KEY = 'tournamentPinHash';
+const SCORING_KEYS = ['scores','kp','ld'];
+let pendingScorerLogin = null;
+let pendingAdminLogin = null;
 
-async function sha256Hex(text){
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+// Resolves once Firebase has finished restoring any saved session.
+function authReady(auth){
+  return new Promise(resolve=>{
+    let done = false, unsub = null;
+    unsub = auth.onAuthStateChanged(user=>{
+      if(done) return;
+      done = true;
+      resolve(user);
+      if(unsub) unsub();
+    });
+    if(done && unsub) unsub();
+  });
 }
 
-function getCachedPinHash(){
-  return localStorage.getItem(TOURNAMENT_PIN_CACHE_KEY) || null;
+function isSignedInAs(auth, email){
+  return !!(auth && auth.currentUser && auth.currentUser.email === email);
 }
 
-function clearCachedPinHash(){
-  localStorage.removeItem(TOURNAMENT_PIN_CACHE_KEY);
+// Password popup (replaces the browser's plain-text prompt). Resolves with the
+// typed password, or null if the person cancels.
+function askPassword(title, message, errorText, email){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.className = 'auth-overlay';
+    overlay.innerHTML = `
+      <form class="auth-box" autocomplete="on">
+        <div class="auth-title">${escapeHtml(title)}</div>
+        <p class="auth-msg">${escapeHtml(message)}</p>
+        <input type="text" name="username" value="${escapeAttr(email||'')}" autocomplete="username" style="display:none" tabindex="-1" aria-hidden="true">
+        <input type="password" class="auth-input" name="password" placeholder="Password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="auth-error" role="alert">${escapeHtml(errorText||'')}</div>
+        <div class="auth-actions">
+          <button type="button" class="btn secondary" data-auth-cancel>Cancel</button>
+          <button type="submit" class="btn">Sign in</button>
+        </div>
+      </form>`;
+    document.body.appendChild(overlay);
+    const form = overlay.querySelector('form');
+    const input = overlay.querySelector('.auth-input');
+    const finish = (value)=>{
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKey = (e)=>{ if(e.key === 'Escape') finish(null); };
+    document.addEventListener('keydown', onKey, true);
+    form.addEventListener('submit', (e)=>{
+      e.preventDefault();
+      if(!input.value){ input.focus(); return; }
+      finish(input.value);
+    });
+    overlay.querySelector('[data-auth-cancel]').addEventListener('click', ()=> finish(null));
+    setTimeout(()=> input.focus(), 50);
+  });
 }
 
-// Returns a PIN hash to attach to writes, prompting for the PIN if none is cached.
-async function ensurePinHash(){
-  const cached = getCachedPinHash();
-  if(cached) return cached;
-  const pin = prompt('Enter the tournament PIN to save changes:');
-  if(!pin) throw new Error('PIN required to save.');
-  const hash = await sha256Hex(pin.trim());
-  localStorage.setItem(TOURNAMENT_PIN_CACHE_KEY, hash);
-  return hash;
+// Asks for the password (up to 5 tries) and signs the given account in.
+// Returns true on success, false if cancelled or out of tries.
+async function signInWithPrompt(auth, email, title, message){
+  let errorText = '';
+  for(let attempt = 0; attempt < 5; attempt++){
+    const pw = await askPassword(title, message, errorText, email);
+    if(pw === null) return false;
+    try{
+      await auth.signInWithEmailAndPassword(email, pw);
+      return true;
+    }catch(err){
+      const code = err && err.code;
+      if(code === 'auth/too-many-requests'){
+        alert('Too many failed attempts. Wait a few minutes, then try again.');
+        return false;
+      }
+      if(code === 'auth/network-request-failed') errorText = 'Network problem — check your connection and try again.';
+      else if(code === 'auth/operation-not-allowed') errorText = 'Email/password sign-in is not enabled in Firebase.';
+      else if(code === 'auth/user-disabled') errorText = 'This account has been disabled.';
+      else if(['auth/invalid-credential','auth/wrong-password','auth/invalid-login-credentials','auth/user-not-found','auth/invalid-email','auth/missing-password'].includes(code)) errorText = 'Incorrect password.';
+      else errorText = 'Sign-in failed (' + (code || 'unknown error') + ').';
+    }
+  }
+  return false;
+}
+
+// Organizer session — needed for Setup and every settings/roster change.
+async function ensureAdminSession(){
+  await authReady(fbAdminAuth);
+  if(!isSignedInAs(fbAdminAuth, ADMIN_EMAIL)){
+    if(!pendingAdminLogin){
+      pendingAdminLogin = signInWithPrompt(fbAdminAuth, ADMIN_EMAIL, 'Organizer sign-in',
+        'Enter the organizer password to open Setup and change tournament settings.')
+        .finally(()=>{ pendingAdminLogin = null; });
+    }
+    const ok = await pendingAdminLogin;
+    if(!ok) throw new Error('Organizer sign-in required.');
+  }
+  return { db: fbAdminApp.database(), auth: fbAdminAuth };
+}
+
+// Score-entry session — the shared scorer account (an organizer who is already
+// signed in may also record scores without a second password).
+async function ensureScoringSession(){
+  await Promise.all([authReady(fbAuth), authReady(fbAdminAuth)]);
+  if(isSignedInAs(fbAuth, SCORER_EMAIL)) return { db: fbDb, auth: fbAuth };
+  if(isSignedInAs(fbAdminAuth, ADMIN_EMAIL)) return { db: fbAdminApp.database(), auth: fbAdminAuth };
+  if(!pendingScorerLogin){
+    pendingScorerLogin = signInWithPrompt(fbAuth, SCORER_EMAIL, 'Score entry sign-in',
+      'Enter the scorer password to record scores.')
+      .finally(()=>{ pendingScorerLogin = null; });
+  }
+  const ok = await pendingScorerLogin;
+  if(!ok) throw new Error('Scorer sign-in required.');
+  return { db: fbDb, auth: fbAuth };
+}
+
+// Runs a write with the right session. If the database rejects it (for
+// example the password was changed and the old session is no longer accepted),
+// the stale session is signed out and the person is asked to sign in again once.
+async function withSession(getSession, doWrite){
+  for(let attempt = 0; attempt < 2; attempt++){
+    const { db, auth } = await getSession();
+    try{
+      await doWrite(db);
+      return;
+    }catch(err){
+      if(err && err.code === 'PERMISSION_DENIED' && attempt === 0){
+        try{ await auth.signOut(); }catch(_){}
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function backendGet(){
@@ -713,7 +933,7 @@ async function fetchJsonOrNull(url, options, label){
   return (data && Object.keys(data).length) ? data : null;
 }
 
-async function backendSet(stateObj){
+async function backendSet(stateObj, opts){
   if(BACKEND.mode === 'rest'){
     const res = await fetch(BACKEND.restUrl, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(stateObj)
@@ -722,30 +942,31 @@ async function backendSet(stateObj){
     return;
   }
   if(BACKEND.mode === 'firebase'){
-    // Attach the PIN hash the Database Rules check on every write. The SDK
-    // rejects a denied write with an error whose .code is 'PERMISSION_DENIED'.
-    let pinHash;
-    try{ pinHash = await ensurePinHash(); }
-    catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
-
-    let attempts = 0;
-    while(attempts < 5){
-      attempts++;
-      try{
-        await fbDb.ref('tournament').set({ ...stateObj, _pinHash: pinHash });
-        return;
-      }catch(err){
-        if(err && err.code === 'PERMISSION_DENIED'){
-          clearCachedPinHash();
-          alert('Incorrect PIN. Please try again.');
-          try{ pinHash = await ensurePinHash(); }
-          catch(e){ alert('Save cancelled: a PIN is required.'); throw e; }
-          continue;
+    // Organizer-only write. Normally this saves just the settings/roster/rounds
+    // fields and leaves scores, closest-to-pin and longest-drive untouched, so
+    // an organizer editing Setup can never overwrite entries other people are
+    // recording. A full restore-from-backup passes { full: true } to replace
+    // everything. (The Database Rules only allow the organizer account here.)
+    try{
+      await withSession(ensureAdminSession, async (db)=>{
+        if(opts && opts.full){
+          const all = { ...stateObj };
+          delete all._pinHash;
+          await db.ref('tournament').set(all);
+        }else{
+          const cfg = {};
+          Object.keys(stateObj).forEach(k=>{
+            if(!SCORING_KEYS.includes(k) && k !== '_pinHash') cfg[k] = stateObj[k];
+          });
+          cfg._pinHash = null; // removes the leftover field from the old PIN scheme
+          await db.ref('tournament').update(cfg);
         }
-        throw err;
-      }
+      });
+    }catch(e){
+      if(e && e.message === 'Organizer sign-in required.') alert('Change not saved — organizer sign-in is required.');
+      throw e;
     }
-    throw new Error('firebase set failed: too many incorrect PIN attempts');
+    return;
   }
   if(BACKEND.mode === 'sheets'){
     // Apps Script web apps need text/plain to avoid a CORS preflight.
@@ -801,7 +1022,7 @@ function normalizeState(s){
   if(typeof s.useCourseHandicap !== 'boolean') s.useCourseHandicap = false;
   if(!s.name) s.name = 'Golf Tournament';
   if(!s.tournamentImageUrl) s.tournamentImageUrl = '';
-  delete s._pinHash; // written by the client for rule-checking only, not app data
+  delete s._pinHash; // leftover from the old PIN scheme; never app data
   return s;
 }
 
@@ -818,10 +1039,8 @@ async function loadState(){
         if(!firstLoad && (currentTab === 'setup' || currentTab === 'enter')) return;
         const data = snapshot.val();
         state = normalizeState(data);
-        if(!data && !seeded){
-          seeded = true;
-          try{ await saveState(); }catch(e){ console.error('initial save failed', e); }
-        }
+        // If the database is empty, defaults are shown locally; the first
+        // organizer save in Setup writes them (visitors can't write).
         if(!entrySel.player && state.players.length) entrySel.player = state.players[0].name;
         render();
         if(firstLoad){ firstLoad = false; resolve(); }
@@ -841,12 +1060,12 @@ async function loadState(){
   render();
 }
 
-async function saveState(){
+async function saveState(opts){
   try{
-    await backendSet(state);
+    await backendSet(state, opts);
   }catch(e){
     console.error('save failed', e);
-    // The write was rejected (e.g. wrong/cancelled PIN). Whatever change was
+    // The write was rejected (e.g. sign-in cancelled). Whatever change was
     // made to `state` in memory never actually reached the database, so pull
     // the real server state back down and re-render — otherwise the failed
     // edit keeps showing locally until the next unrelated page refresh.
@@ -1026,7 +1245,12 @@ function render(){
   }
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===currentTab));
   const main = document.getElementById('main');
-  if(currentTab==='leaderboard') main.innerHTML = renderLeaderboard();
+  if(currentTab==='chat'){
+    // Chat is built once and then updated in place, so live leaderboard
+    // refreshes never wipe a half-typed message or scroll position.
+    if(!document.getElementById('chatRoot')) mountChat(main);
+  }
+  else if(currentTab==='leaderboard') main.innerHTML = renderLeaderboard();
   else if(currentTab==='enter') main.innerHTML = renderEnter();
   else main.innerHTML = renderSetup();
   attachHandlers();
@@ -1619,22 +1843,26 @@ function renderSetup(){
     <p class="muted" style="margin-top:10px;">Downloads a spreadsheet with Overall standings, each round's gross/net and hole-by-hole scores, and Round 1's Individual Sixes points. Open it directly in Excel, or import it into Google Sheets (File → Import → Upload).</p>
   </div>`;
 
+  if(BACKEND.mode === 'firebase'){
+    html += `<div class="card">
+    <button class="btn secondary" id="lockSetupBtn">Sign out of Setup</button>
+    <p class="muted" style="margin-top:10px;">Setup unlocks with the organizer password and locks again automatically when you close this browser tab.</p>
+  </div>`;
+  }
+
   html += `<div class="muted" style="text-align:center; margin-top:16px;">Everyone using this link shares the same live data.</div>`;
   return html;
 }
 
 function attachHandlers(){
   document.querySelectorAll('nav.tabs button').forEach(b=>{
-    b.onclick = ()=>{
+    b.onclick = async ()=>{
       const tab = b.dataset.tab;
-      if(tab === 'setup' && sessionStorage.getItem('setupUnlocked') !== 'true'){
-        const entered = prompt('Enter organizer PIN to access Setup:');
-        if(entered === null) return; // cancelled
-        if(entered !== SETUP_PIN){
-          alert('Incorrect PIN.');
-          return;
-        }
-        sessionStorage.setItem('setupUnlocked', 'true');
+      if(BACKEND.mode === 'firebase'){
+        try{
+          if(tab === 'setup') await ensureAdminSession();        // organizer password
+          else if(tab === 'enter') await ensureScoringSession();  // scorer password
+        }catch(e){ return; } // cancelled or failed sign-in: stay on the current tab
       }
       currentTab = tab;
       render();
@@ -1968,6 +2196,13 @@ function attachHandlers(){
       };
     });
 
+    const lockSetupBtn = document.getElementById('lockSetupBtn');
+    if(lockSetupBtn) lockSetupBtn.onclick = async ()=>{
+      try{ await fbAdminAuth.signOut(); }catch(e){}
+      currentTab = 'leaderboard';
+      render();
+    };
+
     const exportBtn = document.getElementById('exportBtn');
     if(exportBtn) exportBtn.onclick = ()=>{
       const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
@@ -1998,8 +2233,8 @@ function attachHandlers(){
           importStatus.textContent = 'That file doesn\'t look like a valid backup.';
           return;
         }
-        state = parsed;
-        await saveState();
+        state = normalizeState(parsed);
+        await saveState({ full: true });
         importStatus.textContent = 'Backup restored.';
         render();
       }catch(err){
@@ -2021,21 +2256,47 @@ function flashStatus(statusKey, text, isError){
   el._fadeTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1200);
 }
 
+// Saves one small scoring change (a score, a closest-to-pin distance or a
+// longest-drive flag). In Firebase mode this writes ONLY that one database
+// path, so it can never overwrite anyone else's entries and only needs the
+// scorer sign-in. Other backend modes still save the whole state.
+async function persistScoring(write){
+  if(BACKEND.mode !== 'firebase'){ await saveState(); return; }
+  try{
+    await withSession(ensureScoringSession, db => db.ref('tournament/' + write.path).set(write.value));
+  }catch(e){
+    console.error('score save failed', e);
+    if(e && e.message === 'Scorer sign-in required.'){
+      alert('Not saved — the scorer password is needed to record scores.');
+    }
+    // Nothing reached the database, so pull the real server state back down
+    // and re-render — otherwise the failed entry keeps showing locally.
+    try{
+      const serverState = await backendGet();
+      state = normalizeState(serverState);
+      render();
+    }catch(e2){ /* self-corrects on the next successful sync */ }
+    throw e;
+  }
+}
+
 // Shared debounce-then-merge-then-save helper used by scheduleHoleSave and
 // scheduleKpSave: both need to wait for the user to stop typing, re-fetch the
-// latest state (so we don't clobber another device's concurrent edit), apply
-// one small mutation, then persist. Only the "apply mutation" step differs.
+// latest state (so the screen reflects other devices' entries), apply one
+// small mutation locally, then persist just that change. applyMutation returns
+// { savedLabel, write:{ path, value } } — `path` is relative to /tournament and
+// a null `value` deletes the entry.
 function debounceMergeSave(timerKey, delayMs, statusKey, applyMutation){
   if(saveTimers[timerKey]) clearTimeout(saveTimers[timerKey]);
   const doSave = async ()=>{
     try{
       const latest = await backendGet();
       if(latest) state = normalizeState(latest);
-      const { savedLabel } = applyMutation();
-      await saveState();
+      const { savedLabel, write } = applyMutation();
+      await persistScoring(write);
       flashStatus(statusKey, savedLabel);
     }catch(e){
-      // saveState() already reverted `state` to the real server value and
+      // persistScoring() already reverted `state` to the real server value and
       // re-rendered — this just updates the small per-field status label.
       flashStatus(statusKey, 'Failed', true);
     }
@@ -2056,7 +2317,10 @@ function scheduleHoleSave(round, player, hole, rawValue, immediate){
     const k = scoreKey(round, player, hole);
     if(rawValue === ''){ delete state.scores[k]; }
     else { state.scores[k] = Number(rawValue); }
-    return { savedLabel: rawValue === '' ? 'Cleared' : 'Saved' };
+    return {
+      savedLabel: rawValue === '' ? 'Cleared' : 'Saved',
+      write: { path: `scores/${k}`, value: rawValue === '' ? null : Number(rawValue) }
+    };
   });
 }
 
@@ -2071,8 +2335,9 @@ function scheduleKpSave(round, player, hole, field, rawValue){
   debounceMergeSave(timerKey, 600, statusKey, ()=>{
     const k = kpKey(round, player, hole);
     if(!state.kp[k]) state.kp[k] = { feet: null, inches: null };
-    state.kp[k][field] = rawValue === '' ? null : Number(rawValue);
-    return { savedLabel: 'Saved' };
+    const value = rawValue === '' ? null : Number(rawValue);
+    state.kp[k][field] = value;
+    return { savedLabel: 'Saved', write: { path: `kp/${k}/${field}`, value } };
   });
 }
 
@@ -2082,9 +2347,9 @@ async function saveLdCheck(round, player, hole, checked){
     const latest = await backendGet();
     if(latest) state = normalizeState(latest);
     const k = ldKey(round, player, hole);
-    const prevTs = state.ld[k] ? state.ld[k].ts : null;
+    const prevTs = (state.ld[k] && state.ld[k].ts !== undefined && state.ld[k].ts !== null) ? state.ld[k].ts : null;
     state.ld[k] = { checked, ts: checked ? Date.now() : prevTs };
-    await saveState();
+    await persistScoring({ path: `ld/${k}`, value: { checked, ts: state.ld[k].ts } });
     flashStatus(statusKey, checked ? 'LD set' : 'Cleared');
   }catch(e){
     flashStatus(statusKey, 'Failed', true);
@@ -2174,6 +2439,402 @@ async function pollForUpdates(){
     }
   }catch(e){}
 }
+
+// ============================================================
+// CHAT TAB — live chat on Firebase Realtime Database at /chat.
+// No login: people just pick a handle (remembered on their device).
+// Requires the /chat Database Rules (see chat-rules.json), otherwise
+// messages are rejected and the tab shows a friendly error.
+// ============================================================
+const CHAT_MAX_NAME    = 20;
+const CHAT_MAX_TEXT    = 300;
+const CHAT_KEEP        = 100;                    // newest messages loaded / shown
+const CHAT_TTL_MS      = 3 * 24 * 60 * 60 * 1000; // auto-delete age — must match the rule (259200000)
+const CHAT_COOLDOWN_MS = 1000;                   // minimum gap between sends from one device
+const CHAT_COLORS      = ['#7FC4A0','#E58F73','#8DB6E8','#C99AE0','#D9C46A','#E88FB4'];
+
+function chatLsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function chatLsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+
+const CHAT_CID = (()=>{                          // anonymous per-device id, used only to style "my" messages
+  let id = chatLsGet('chatCid');
+  if(!id){
+    id = 'c' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    chatLsSet('chatCid', id);
+  }
+  return id;
+})();
+
+const chatMsgs = new Map();                      // key -> {key,name,text,ts,cid}
+let chatLoaded = false;
+let chatErr = '';
+let chatSeen = (()=>{ const s = chatLsGet('chatLastSeen'); return s === null ? null : Number(s); })();
+let chatDraft = '';
+let chatEditing = false;                         // true while changing handle
+let chatModerator = false;
+let chatLastSent = 0;
+
+function chatSanitize(key, v){
+  if(!v || typeof v.text !== 'string' || typeof v.name !== 'string') return null;
+  return {
+    key,
+    name: v.name.slice(0, CHAT_MAX_NAME),
+    text: v.text.slice(0, CHAT_MAX_TEXT),
+    ts: Number(v.ts) || 0,
+    cid: typeof v.cid === 'string' ? v.cid : ''
+  };
+}
+
+function chatColor(name){
+  let h = 0;
+  const s = String(name).toLowerCase();
+  for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return CHAT_COLORS[h % CHAT_COLORS.length];
+}
+
+function chatFmtTime(ts){
+  if(!ts) return '';
+  const d = new Date(ts), now = new Date();
+  const t = d.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+  if(d.toDateString() === now.toDateString()) return t;
+  return d.toLocaleDateString([], { month:'short', day:'numeric' }) + ' ' + t;
+}
+
+function chatLatestTs(){
+  let t = 0;
+  for(const m of chatMsgs.values()) if(m.ts > t) t = m.ts;
+  return t;
+}
+
+function chatNearBottom(list){
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+
+// ---------- unread badge ----------
+function chatUpdateBadge(){
+  const badge = document.getElementById('chatBadge');
+  if(!badge) return;
+  let n = 0;
+  if(chatSeen !== null){
+    for(const m of chatMsgs.values()) if(m.cid !== CHAT_CID && m.ts > chatSeen) n++;
+  }
+  if(currentTab === 'chat' && document.visibilityState === 'visible') n = 0;
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.hidden = n === 0;
+  const btn = document.querySelector('nav.tabs button[data-tab="chat"]');
+  if(btn) btn.classList.toggle('chat-unread', n > 0);
+}
+
+function chatMarkSeen(){
+  const t = chatLatestTs();
+  if(t && (chatSeen === null || t > chatSeen)){
+    chatSeen = t;
+    chatLsSet('chatLastSeen', String(t));
+  }
+  chatUpdateBadge();
+}
+
+// ---------- status line ----------
+function chatSetStatus(msg, transient){
+  if(!transient) chatErr = msg || '';
+  const el = document.getElementById('chatStatus');
+  if(!el) return;
+  el.textContent = msg || '';
+  el.hidden = !msg;
+  if(transient && msg){
+    setTimeout(()=>{ if(el.textContent === msg){ el.textContent = chatErr; el.hidden = !chatErr; } }, 5000);
+  }
+}
+
+// ---------- message list ----------
+function chatEmptyState(list){
+  const e = document.createElement('div');
+  e.className = 'chat-empty';
+  e.textContent = chatErr ? '' : (chatLoaded ? 'No messages yet. Say something!' : 'Loading chat…');
+  list.appendChild(e);
+}
+
+function chatAppend(list, m){
+  const empty = list.querySelector('.chat-empty');
+  if(empty) empty.remove();
+  const mine = m.cid === CHAT_CID;
+
+  const row = document.createElement('div');
+  row.className = 'chat-row' + (mine ? ' mine' : '');
+  row.setAttribute('data-chat-key', m.key);
+
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+
+  const meta = document.createElement('div');
+  meta.className = 'chat-meta';
+  const nm = document.createElement('span');
+  nm.className = 'chat-name';
+  nm.textContent = m.name;                       // textContent: never interpreted as HTML
+  if(!mine) nm.style.color = chatColor(m.name);
+  const tm = document.createElement('span');
+  tm.className = 'chat-time';
+  tm.textContent = chatFmtTime(m.ts);
+  meta.appendChild(nm);
+  meta.appendChild(tm);
+  if(chatModerator){
+    const x = document.createElement('button');
+    x.className = 'chat-del';
+    x.textContent = '×';
+    x.title = 'Delete message';
+    x.setAttribute('aria-label', 'Delete message');
+    x.setAttribute('data-chat-del', m.key);
+    meta.appendChild(x);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'chat-text';
+  body.textContent = m.text;
+
+  bubble.appendChild(meta);
+  bubble.appendChild(body);
+  row.appendChild(bubble);
+  list.appendChild(row);
+}
+
+function chatRenderAll(){
+  const list = document.getElementById('chatList');
+  if(!list) return;
+  list.innerHTML = '';
+  if(!chatMsgs.size) chatEmptyState(list);
+  else for(const m of chatMsgs.values()) chatAppend(list, m);
+  list.scrollTop = list.scrollHeight;
+  chatShowNewPill(false);
+}
+
+function chatShowNewPill(show){
+  const p = document.getElementById('chatNewPill');
+  if(p) p.hidden = !show;
+}
+
+// a message arrived after the initial history load
+function chatOnLive(m){
+  if(currentTab === 'chat'){
+    const list = document.getElementById('chatList');
+    if(list){
+      const stick = chatNearBottom(list) || m.cid === CHAT_CID;
+      chatAppend(list, m);
+      if(stick){ list.scrollTop = list.scrollHeight; chatShowNewPill(false); }
+      else chatShowNewPill(true);
+    }
+    if(document.visibilityState === 'visible') chatMarkSeen();
+  }
+  chatUpdateBadge();
+}
+
+// ---------- composer (handle picker + message box) ----------
+function chatGetHandle(){ return chatLsGet('chatHandle') || ''; }
+
+function chatRenderComposer(){
+  const box = document.getElementById('chatComposer');
+  if(!box) return;
+  const handle = chatGetHandle();
+
+  if(!handle || chatEditing){
+    box.innerHTML =
+      '<div class="card chat-join">' +
+        '<label for="chatHandleInput">PICK A HANDLE</label>' +
+        '<div class="chat-inputrow">' +
+          '<input type="text" id="chatHandleInput" maxlength="' + CHAT_MAX_NAME + '" placeholder="Your name or nickname" autocomplete="nickname" autocapitalize="words" enterkeyhint="go">' +
+          '<button class="btn" id="chatJoinBtn" type="button">' + (handle ? 'Save' : 'Join') + '</button>' +
+        '</div>' +
+      '</div>';
+    const hi = document.getElementById('chatHandleInput');
+    hi.value = handle;
+    const save = ()=>{
+      const v = hi.value.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_NAME);
+      if(!v){ hi.focus(); return; }
+      chatLsSet('chatHandle', v);
+      chatEditing = false;
+      chatRenderComposer();
+      const mi = document.getElementById('chatInput');
+      if(mi) mi.focus();
+    };
+    document.getElementById('chatJoinBtn').onclick = save;
+    hi.onkeydown = e=>{ if(e.key === 'Enter'){ e.preventDefault(); save(); } };
+    return;
+  }
+
+  box.innerHTML =
+    '<div class="chat-as">Posting as <b id="chatAsName"></b> · <button class="chat-link" id="chatChangeBtn" type="button">change</button></div>' +
+    '<div class="chat-inputrow">' +
+      '<input type="text" id="chatInput" maxlength="' + CHAT_MAX_TEXT + '" placeholder="Message…" autocomplete="off" enterkeyhint="send">' +
+      '<button class="btn" id="chatSendBtn" type="button">Send</button>' +
+    '</div>';
+  document.getElementById('chatAsName').textContent = handle;
+  const input = document.getElementById('chatInput');
+  input.value = chatDraft;
+  input.oninput = ()=>{ chatDraft = input.value; };
+  input.onkeydown = e=>{ if(e.key === 'Enter'){ e.preventDefault(); chatSend(); } };
+  const sendBtn = document.getElementById('chatSendBtn');
+  sendBtn.onmousedown = e=>e.preventDefault();   // keep the keyboard open on phones
+  sendBtn.onclick = chatSend;
+  document.getElementById('chatChangeBtn').onclick = ()=>{ chatEditing = true; chatRenderComposer(); const h = document.getElementById('chatHandleInput'); if(h){ h.focus(); h.select(); } };
+}
+
+async function chatSend(){
+  const input = document.getElementById('chatInput');
+  const name = chatGetHandle();
+  if(!input || !name || !fbDb) return;
+  const text = input.value.replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX_TEXT);
+  if(!text) return;
+  const now = Date.now();
+  if(now - chatLastSent < CHAT_COOLDOWN_MS) return;
+  chatLastSent = now;
+  input.value = '';
+  chatDraft = '';
+  input.focus();
+  try{
+    await fbDb.ref('chat').push({
+      name, text, cid: CHAT_CID,
+      ts: firebase.database.ServerValue.TIMESTAMP   // server clock, so everyone's timestamps agree
+    });
+  }catch(err){
+    console.error('chat send failed', err);
+    const cur = document.getElementById('chatInput');
+    if(cur && !cur.value){ cur.value = text; chatDraft = text; }
+    chatSetStatus(err && err.code === 'PERMISSION_DENIED'
+      ? 'Message rejected — chat rules may not be installed yet.'
+      : 'Could not send. Check your connection.', true);
+  }
+}
+
+// ---------- moderator (organizer password) ----------
+function chatRenderFoot(){
+  const foot = document.getElementById('chatFoot');
+  if(!foot) return;
+  const days = Math.round(CHAT_TTL_MS / 86400000);
+  if(!chatModerator){
+    foot.innerHTML = 'Messages auto-delete after ' + days + ' days. · <button class="chat-link" id="chatModBtn" type="button">Moderator</button>';
+    document.getElementById('chatModBtn').onclick = async ()=>{
+      try{ await ensureAdminSession(); }catch(e){ return; }
+      chatModerator = true;
+      chatRenderAll();
+      chatRenderFoot();
+    };
+  }else{
+    foot.innerHTML = '<b>Moderator mode</b> — tap × to delete a message. · ' +
+      '<button class="chat-link" id="chatClearBtn" type="button">Clear all</button> · ' +
+      '<button class="chat-link" id="chatModOff" type="button">Done</button>';
+    document.getElementById('chatModOff').onclick = ()=>{ chatModerator = false; chatRenderAll(); chatRenderFoot(); };
+    document.getElementById('chatClearBtn').onclick = async ()=>{
+      if(!confirm('Delete ALL chat messages for everyone?')) return;
+      try{ await withSession(ensureAdminSession, db=>db.ref('chat').remove()); }
+      catch(e){ chatSetStatus('Could not clear chat. Check organizer sign-in and rules.', true); }
+    };
+  }
+}
+
+async function chatDelete(key){
+  try{ await withSession(ensureAdminSession, db=>db.ref('chat/' + key).remove()); }
+  catch(e){ chatSetStatus('Could not delete. Check organizer sign-in and rules.', true); }
+}
+
+// ---------- mounting the tab ----------
+function mountChat(main){
+  if(BACKEND.mode !== 'firebase' || !fbDb){
+    main.innerHTML = '<div class="card"><div class="muted">Chat needs the Firebase backend.</div></div>';
+    return;
+  }
+  main.innerHTML =
+    '<div id="chatRoot">' +
+      '<h2 class="section-title">Chat</h2>' +
+      '<div class="chat-status" id="chatStatus" hidden></div>' +
+      '<div class="chat-wrap">' +
+        '<div class="chat-list" id="chatList" aria-live="polite"></div>' +
+        '<button class="chat-newpill" id="chatNewPill" type="button" hidden>New messages ↓</button>' +
+      '</div>' +
+      '<div id="chatComposer"></div>' +
+      '<div class="chat-foot" id="chatFoot"></div>' +
+    '</div>';
+
+  const list = document.getElementById('chatList');
+  list.addEventListener('scroll', ()=>{ if(chatNearBottom(list)) chatShowNewPill(false); });
+  list.addEventListener('click', e=>{
+    const b = e.target.closest('[data-chat-del]');
+    if(b) chatDelete(b.getAttribute('data-chat-del'));
+  });
+  document.getElementById('chatNewPill').onclick = ()=>{ list.scrollTop = list.scrollHeight; chatShowNewPill(false); };
+
+  chatSetStatus(chatErr);
+  chatRenderAll();
+  chatRenderComposer();
+  chatRenderFoot();
+  chatMarkSeen();
+}
+
+// ---------- live connection ----------
+// Removes messages older than CHAT_TTL_MS. Any device may do this: the Database
+// Rules only allow the public to delete messages that are already that old.
+async function chatCleanupOld(){
+  try{
+    for(let pass = 0; pass < 4; pass++){
+      const snap = await fbDb.ref('chat').orderByKey().limitToFirst(50).once('value');
+      const cutoff = Date.now() - CHAT_TTL_MS;
+      const updates = {};
+      let stale = 0, seen = 0;
+      snap.forEach(c=>{
+        seen++;
+        const v = c.val();
+        if(v && Number(v.ts) < cutoff){ updates[c.key] = null; stale++; }
+      });
+      if(stale) await fbDb.ref('chat').update(updates);
+      if(stale < 50 || seen < 50) break;
+    }
+  }catch(e){ /* housekeeping only — never blocks chat */ }
+}
+
+function initChat(){
+  if(BACKEND.mode !== 'firebase' || !fbDb) return;
+  const q = fbDb.ref('chat').orderByKey().limitToLast(CHAT_KEEP);
+  const fail = err=>{
+    console.error('chat listener error', err);
+    chatSetStatus('Chat is not set up yet (database rules for /chat are missing).');
+    const list = document.getElementById('chatList');
+    if(list && !chatMsgs.size){ list.innerHTML = ''; }
+  };
+
+  q.on('child_added', snap=>{
+    const m = chatSanitize(snap.key, snap.val());
+    if(!m) return;
+    chatMsgs.set(m.key, m);
+    if(chatLoaded) chatOnLive(m);
+  }, fail);
+
+  q.on('child_removed', snap=>{
+    chatMsgs.delete(snap.key);
+    const list = document.getElementById('chatList');
+    if(list){
+      const el = list.querySelector('[data-chat-key="' + snap.key + '"]');
+      if(el) el.remove();
+      if(!chatMsgs.size && !list.querySelector('.chat-empty')) chatEmptyState(list);
+    }
+    chatUpdateBadge();
+  });
+
+  // Fires after the initial batch of child_added events has been delivered.
+  q.once('value', ()=>{
+    chatLoaded = true;
+    if(chatSeen === null){                       // first visit: don't badge the whole backlog
+      chatSeen = chatLatestTs() || Date.now();
+      chatLsSet('chatLastSeen', String(chatSeen));
+    }
+    if(currentTab === 'chat'){ chatRenderAll(); chatMarkSeen(); }
+    chatUpdateBadge();
+    chatCleanupOld();
+  }, fail);
+
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible' && currentTab === 'chat') chatMarkSeen();
+  });
+}
+
+initChat();
 
 loadState();
 if(BACKEND.mode !== 'firebase'){
