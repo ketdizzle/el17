@@ -356,6 +356,24 @@
     color: var(--amber);
     padding: 6px 0;
   }
+  details.lb-details{ margin-bottom: 0; }
+  summary.section-title{
+    cursor:pointer;
+    list-style:none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  summary.section-title::-webkit-details-marker{ display:none; }
+  summary.section-title::after{
+    content:'▾';
+    font-size:12px;
+    color: var(--amber-dim);
+    margin-left:10px;
+    transform: rotate(-90deg);
+    transition: transform 0.15s ease;
+  }
+  details[open]>summary.section-title::after{ transform: rotate(0deg); }
   .hole-list{
     padding: 6px 12px;
   }
@@ -644,6 +662,15 @@ let entryMode = 'player'; // 'player' | 'hole'
 let pollTimer = null;
 // Tracks open/closed state of <details> sections across re-renders (not persisted to backend, per-browser only).
 const uiDetailsState = {};
+
+// Wraps a leaderboard section in a collapsible <details>, defaulting to open the first time it's seen.
+function lbSection(key, titleHtml, innerHtml){
+  if(!(key in uiDetailsState)) uiDetailsState[key] = true;
+  return `<details class="lb-details" data-details-key="${key}" ${uiDetailsState[key] ? 'open' : ''}>
+    <summary class="section-title">${titleHtml}</summary>
+    ${innerHtml}
+  </details>`;
+}
 
 // Which holes are Closest-to-Pin / Longest-Drive contests, per round.
 const ROUND_KP_LD_DEFAULTS = {
@@ -1306,31 +1333,31 @@ function renderLeaderboard(){
     }).sort((a,b)=> (a.count===0)-(b.count===0) || a.total-b.total);
 
     return tabs + `
-      <h2 class="section-title">Overall — Gross</h2>
-      <div class="card">${gross.map((r,i)=>`
-        <div class="lb-row">
-          <span class="lb-rank">${r.count===0?'–':i+1}</span>
-          <span class="lb-name">${escapeHtml(r.name)}</span>
-          ${scoreCellHtml(r.count, r.total, r.toPar)}
-        </div>`).join('')}
-      </div>
-      <h2 class="section-title">Overall — Net</h2>
-      <div class="card">${net.map((r,i)=>`
-        <div class="lb-row">
-          <span class="lb-rank">${r.count===0?'–':i+1}</span>
-          <span class="lb-name">${escapeHtml(r.name)}</span>
-          ${scoreCellHtml(r.count, r.total, r.toPar)}
-        </div>`).join('')}
-      </div>
-      <p class="muted">Net = gross minus handicap strokes allocated per hole. To-par shows once par is entered for every hole played, in Setup.</p>
-      <h2 class="section-title">Handicaps</h2>
-      <div class="card">${[...state.players].sort((a,b)=> (Number(a.handicap)||0) - (Number(b.handicap)||0)).map((p,i)=>`
-        <div class="lb-row">
-          <span class="lb-rank">${i+1}</span>
-          <span class="lb-name">${escapeHtml(p.name)}</span>
-          <span class="lb-score">${Number(p.handicap)||0}</span>
-        </div>`).join('')}
-      </div>
+      ${lbSection('overall-gross', 'Overall — Gross', `
+        <div class="card">${gross.map((r,i)=>`
+          <div class="lb-row">
+            <span class="lb-rank">${r.count===0?'–':i+1}</span>
+            <span class="lb-name">${escapeHtml(r.name)}</span>
+            ${scoreCellHtml(r.count, r.total, r.toPar)}
+          </div>`).join('')}
+        </div>`)}
+      ${lbSection('overall-net', 'Overall — Net', `
+        <div class="card">${net.map((r,i)=>`
+          <div class="lb-row">
+            <span class="lb-rank">${r.count===0?'–':i+1}</span>
+            <span class="lb-name">${escapeHtml(r.name)}</span>
+            ${scoreCellHtml(r.count, r.total, r.toPar)}
+          </div>`).join('')}
+        </div>
+        <p class="muted">Net = gross minus handicap strokes allocated per hole. To-par shows once par is entered for every hole played, in Setup.</p>`)}
+      ${lbSection('overall-handicaps', 'Handicaps', `
+        <div class="card">${[...state.players].sort((a,b)=> (Number(a.handicap)||0) - (Number(b.handicap)||0)).map((p,i)=>`
+          <div class="lb-row">
+            <span class="lb-rank">${i+1}</span>
+            <span class="lb-name">${escapeHtml(p.name)}</span>
+            <span class="lb-score">${Number(p.handicap)||0}</span>
+          </div>`).join('')}
+        </div>`)}
     `;
   } else {
     const round = getRound(lbView);
@@ -1351,7 +1378,7 @@ function renderLeaderboard(){
       const hasGroups = (round.quads||[]).some(q=>q.players.filter(Boolean).length===4);
 
       const validQuads = (round.quads||[]).filter(q=>q.players.filter(Boolean).length===4);
-      const groupsHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points · Groups</h2>
+      const groupsHtml = lbSection(`round-${round.id}-sixes-groups`, `${escapeHtml(round.label)} — Individual Sixes Points · Groups`, `
         <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
         ${validQuads.length ? validQuads.map((quad, qi)=>{
           const groupRows = quad.players.filter(Boolean).map(name=>{
@@ -1375,10 +1402,9 @@ function renderLeaderboard(){
                 </div>`).join('')}
             </div>
           </div>`;
-        }).join('') : `<div class="card"><div class="muted">Set up your foursomes for this round in Setup to see points.</div></div>`}`;
+        }).join('') : `<div class="card"><div class="muted">Set up your foursomes for this round in Setup to see points.</div></div>`}`);
 
-      sixesHtml = `${groupsHtml}
-        <h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points</h2>
+      const pointsHtml = lbSection(`round-${round.id}-sixes-points`, `${escapeHtml(round.label)} — Individual Sixes Points`, `
         <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
         <div class="card">
         ${hasGroups ? rows.map((r,i)=>`
@@ -1387,7 +1413,9 @@ function renderLeaderboard(){
             <span class="lb-name">${escapeHtml(r.name)}</span>
             <span class="lb-score">${r.pts}</span>
           </div>`).join('') : `<div class="muted">Set up your foursomes for this round in Setup to see points.</div>`}
-        </div>`;
+        </div>`);
+
+      sixesHtml = `${groupsHtml}${pointsHtml}`;
     }
 
     let pairsHtml = '';
@@ -1395,7 +1423,7 @@ function renderLeaderboard(){
       const teamResults = pairsTotalsForRound(round.id)
         .sort((a,b)=> (a.count===0)-(b.count===0) || a.total-b.total);
       const hasPairs = (round.pairs||[]).some(p=>p.players.filter(Boolean).length===2);
-      pairsHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Team Score (Best Ball Gross + Net)</h2>
+      pairsHtml = lbSection(`round-${round.id}-pairs`, `${escapeHtml(round.label)} — Team Score (Best Ball Gross + Net)`, `
         <div class="card">
         ${hasPairs ? teamResults.map((r,i)=>`
           <div class="lb-row">
@@ -1404,7 +1432,7 @@ function renderLeaderboard(){
             <span class="lb-score ${r.count===0?'dim':''}">${r.count===0?'—':r.total}</span>
           </div>`).join('') : `<div class="muted">Set up your pairs for this round in Setup to see team scores.</div>`}
         </div>
-        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`;
+        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`);
     }
 
     const kpByHole = (round.kpHoles||[]).map(hole=>{
@@ -1429,7 +1457,7 @@ function renderLeaderboard(){
     const hasKpLd = (round.kpHoles||[]).length > 0 || (round.ldHoles||[]).length > 0;
     let kpLdHtml = '';
     if(hasKpLd){
-      kpLdHtml = `<h2 class="section-title">Daily KP and LD</h2>
+      kpLdHtml = lbSection(`round-${round.id}-kpld`, 'Daily KP and LD', `
         ${ldByHole.map(({hole, entries})=>`
           <div class="card kp-ld-card">
             <div class="kp-ld-row">
@@ -1446,7 +1474,7 @@ function renderLeaderboard(){
                 <span class="lb-name">${escapeHtml(e.player)}</span>
                 <span class="lb-score">${e.feet}' ${e.inches}"</span>
               </div>`).join('') : `<div class="muted">No entries yet</div>`}
-          </div>`).join('')}`;
+          </div>`).join('')}`);
     }
 
     const logoHtml = round.logoUrl
@@ -1474,22 +1502,22 @@ function renderLeaderboard(){
       ${kpLdHtml}
       ${pairsHtml}
       ${sixesHtml}
-      <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
-      <div class="card">${gross.map((r,i)=>`
-        <div class="lb-row">
-          <span class="lb-rank">${r.count===0?'–':i+1}</span>
-          <span class="lb-name">${escapeHtml(r.name)}</span>
-          ${scoreCellHtml(r.count, r.total, r.toPar)}
-        </div>`).join('')}
-      </div>
-      <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Net</h2>
-      <div class="card">${net.map((r,i)=>`
-        <div class="lb-row">
-          <span class="lb-rank">${r.count===0?'–':i+1}</span>
-          <span class="lb-name">${escapeHtml(r.name)}</span>
-          ${scoreCellHtml(r.count, r.total, r.toPar)}
-        </div>`).join('')}
-      </div>
+      ${lbSection(`round-${round.id}-gross`, `${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross`, `
+        <div class="card">${gross.map((r,i)=>`
+          <div class="lb-row">
+            <span class="lb-rank">${r.count===0?'–':i+1}</span>
+            <span class="lb-name">${escapeHtml(r.name)}</span>
+            ${scoreCellHtml(r.count, r.total, r.toPar)}
+          </div>`).join('')}
+        </div>`)}
+      ${lbSection(`round-${round.id}-net`, `${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Net`, `
+        <div class="card">${net.map((r,i)=>`
+          <div class="lb-row">
+            <span class="lb-rank">${r.count===0?'–':i+1}</span>
+            <span class="lb-name">${escapeHtml(r.name)}</span>
+            ${scoreCellHtml(r.count, r.total, r.toPar)}
+          </div>`).join('')}
+        </div>`)}
     `;
   }
 }
