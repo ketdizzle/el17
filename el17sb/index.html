@@ -665,7 +665,7 @@ const uiDetailsState = {};
 
 // Wraps a leaderboard section in a collapsible <details>, defaulting to open the first time it's seen.
 function lbSection(key, titleHtml, innerHtml){
-  if(!(key in uiDetailsState)) uiDetailsState[key] = true;
+  if(!(key in uiDetailsState)) uiDetailsState[key] = false;
   return `<details class="lb-details" data-details-key="${key}" ${uiDetailsState[key] ? 'open' : ''}>
     <summary class="section-title">${titleHtml}</summary>
     ${innerHtml}
