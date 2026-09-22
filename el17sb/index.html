@@ -1349,7 +1349,36 @@ function renderLeaderboard(){
       const rows = state.players.map(p=>({name:p.name, pts: totals[p.name]||0}))
         .sort((a,b)=>b.pts-a.pts);
       const hasGroups = (round.quads||[]).some(q=>q.players.filter(Boolean).length===4);
-      sixesHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points</h2>
+
+      const validQuads = (round.quads||[]).filter(q=>q.players.filter(Boolean).length===4);
+      const groupsHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points · Groups</h2>
+        <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
+        ${validQuads.length ? validQuads.map((quad, qi)=>{
+          const groupRows = quad.players.filter(Boolean).map(name=>{
+            const {total:grossTotal, count:grossCount} = roundGrossTotal(round.id, name);
+            return { name, pts: totals[name]||0, grossTotal, grossCount };
+          }).sort((a,b)=>{
+            if(b.pts !== a.pts) return b.pts - a.pts;
+            const aHas = a.grossCount>0, bHas = b.grossCount>0;
+            if(aHas !== bHas) return aHas ? -1 : 1;
+            return a.grossTotal - b.grossTotal;
+          });
+          return `
+          <div class="group-lb-block" style="margin-bottom:14px;">
+            <div class="muted" style="font-family:'Oswald',sans-serif; letter-spacing:0.04em; font-size:12px; text-transform:uppercase; margin:0 0 6px;">Group ${qi+1}</div>
+            <div class="card">
+              ${groupRows.map((r,i)=>`
+                <div class="lb-row">
+                  <span class="lb-rank">${i+1}</span>
+                  <span class="lb-name">${escapeHtml(r.name)}</span>
+                  <span class="lb-score">${r.pts}</span>
+                </div>`).join('')}
+            </div>
+          </div>`;
+        }).join('') : `<div class="card"><div class="muted">Set up your foursomes for this round in Setup to see points.</div></div>`}`;
+
+      sixesHtml = `${groupsHtml}
+        <h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points</h2>
         <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
         <div class="card">
         ${hasGroups ? rows.map((r,i)=>`
