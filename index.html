@@ -356,24 +356,6 @@
     color: var(--amber);
     padding: 6px 0;
   }
-  details.lb-details{ margin-bottom: 0; }
-  summary.section-title{
-    cursor:pointer;
-    list-style:none;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-  }
-  summary.section-title::-webkit-details-marker{ display:none; }
-  summary.section-title::after{
-    content:'▾';
-    font-size:12px;
-    color: var(--amber-dim);
-    margin-left:10px;
-    transform: rotate(-90deg);
-    transition: transform 0.15s ease;
-  }
-  details[open]>summary.section-title::after{ transform: rotate(0deg); }
   .hole-list{
     padding: 6px 12px;
   }
@@ -663,15 +645,6 @@ let pollTimer = null;
 // Tracks open/closed state of <details> sections across re-renders (not persisted to backend, per-browser only).
 const uiDetailsState = {};
 
-// Wraps a leaderboard section in a collapsible <details>, defaulting to open the first time it's seen.
-function lbSection(key, titleHtml, innerHtml){
-  if(!(key in uiDetailsState)) uiDetailsState[key] = false;
-  return `<details class="lb-details" data-details-key="${key}" ${uiDetailsState[key] ? 'open' : ''}>
-    <summary class="section-title">${titleHtml}</summary>
-    ${innerHtml}
-  </details>`;
-}
-
 // Which holes are Closest-to-Pin / Longest-Drive contests, per round.
 const ROUND_KP_LD_DEFAULTS = {
   r1: { kp:[4,13], ld:[8,16] },
@@ -686,6 +659,7 @@ function defaultState(){
     name: 'Golf Tournament',
     tournamentImageUrl: '',
     useCourseHandicap: false, // global default: false = straight Handicap Index everywhere
+    chatEnabled: true, // organizer toggle: turns the CHAT tab on/off for everyone
     players: Array.from({length:16}, (_,i)=>({ name:`Player ${i+1}`, handicap: 0 })),
     rounds: [
       {
@@ -1047,6 +1021,7 @@ function normalizeState(s){
   if(!s.kp || typeof s.kp !== 'object') s.kp = {};
   if(!s.ld || typeof s.ld !== 'object') s.ld = {};
   if(typeof s.useCourseHandicap !== 'boolean') s.useCourseHandicap = false;
+  if(typeof s.chatEnabled !== 'boolean') s.chatEnabled = true;
   if(!s.name) s.name = 'Golf Tournament';
   if(!s.tournamentImageUrl) s.tournamentImageUrl = '';
   delete s._pinHash; // leftover from the old PIN scheme; never app data
@@ -1272,10 +1247,14 @@ function render(){
   }
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===currentTab));
   const main = document.getElementById('main');
+  const chatBtn = document.querySelector('nav.tabs button[data-tab="chat"]');
+  if(chatBtn) chatBtn.style.display = state.chatEnabled !== false ? '' : 'none';
+  if(typeof chatSyncListener === 'function') chatSyncListener();
   if(currentTab==='chat'){
+    if(state.chatEnabled === false){ main.innerHTML = ''; }
     // Chat is built once and then updated in place, so live leaderboard
     // refreshes never wipe a half-typed message or scroll position.
-    if(!document.getElementById('chatRoot')) mountChat(main);
+    else if(!document.getElementById('chatRoot')) mountChat(main);
   }
   else if(currentTab==='leaderboard') main.innerHTML = renderLeaderboard();
   else if(currentTab==='enter') main.innerHTML = renderEnter();
@@ -1333,31 +1312,31 @@ function renderLeaderboard(){
     }).sort((a,b)=> (a.count===0)-(b.count===0) || a.total-b.total);
 
     return tabs + `
-      ${lbSection('overall-gross', 'Overall — Gross', `
-        <div class="card">${gross.map((r,i)=>`
-          <div class="lb-row">
-            <span class="lb-rank">${r.count===0?'–':i+1}</span>
-            <span class="lb-name">${escapeHtml(r.name)}</span>
-            ${scoreCellHtml(r.count, r.total, r.toPar)}
-          </div>`).join('')}
-        </div>`)}
-      ${lbSection('overall-net', 'Overall — Net', `
-        <div class="card">${net.map((r,i)=>`
-          <div class="lb-row">
-            <span class="lb-rank">${r.count===0?'–':i+1}</span>
-            <span class="lb-name">${escapeHtml(r.name)}</span>
-            ${scoreCellHtml(r.count, r.total, r.toPar)}
-          </div>`).join('')}
-        </div>
-        <p class="muted">Net = gross minus handicap strokes allocated per hole. To-par shows once par is entered for every hole played, in Setup.</p>`)}
-      ${lbSection('overall-handicaps', 'Handicaps', `
-        <div class="card">${[...state.players].sort((a,b)=> (Number(a.handicap)||0) - (Number(b.handicap)||0)).map((p,i)=>`
-          <div class="lb-row">
-            <span class="lb-rank">${i+1}</span>
-            <span class="lb-name">${escapeHtml(p.name)}</span>
-            <span class="lb-score">${Number(p.handicap)||0}</span>
-          </div>`).join('')}
-        </div>`)}
+      <h2 class="section-title">Overall — Gross</h2>
+      <div class="card">${gross.map((r,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${r.count===0?'–':i+1}</span>
+          <span class="lb-name">${escapeHtml(r.name)}</span>
+          ${scoreCellHtml(r.count, r.total, r.toPar)}
+        </div>`).join('')}
+      </div>
+      <h2 class="section-title">Overall — Net</h2>
+      <div class="card">${net.map((r,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${r.count===0?'–':i+1}</span>
+          <span class="lb-name">${escapeHtml(r.name)}</span>
+          ${scoreCellHtml(r.count, r.total, r.toPar)}
+        </div>`).join('')}
+      </div>
+      <p class="muted">Net = gross minus handicap strokes allocated per hole. To-par shows once par is entered for every hole played, in Setup.</p>
+      <h2 class="section-title">Handicaps</h2>
+      <div class="card">${[...state.players].sort((a,b)=> (Number(a.handicap)||0) - (Number(b.handicap)||0)).map((p,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${i+1}</span>
+          <span class="lb-name">${escapeHtml(p.name)}</span>
+          <span class="lb-score">${Number(p.handicap)||0}</span>
+        </div>`).join('')}
+      </div>
     `;
   } else {
     const round = getRound(lbView);
@@ -1376,35 +1355,7 @@ function renderLeaderboard(){
       const rows = state.players.map(p=>({name:p.name, pts: totals[p.name]||0}))
         .sort((a,b)=>b.pts-a.pts);
       const hasGroups = (round.quads||[]).some(q=>q.players.filter(Boolean).length===4);
-
-      const validQuads = (round.quads||[]).filter(q=>q.players.filter(Boolean).length===4);
-      const groupsHtml = lbSection(`round-${round.id}-sixes-groups`, `${escapeHtml(round.label)} — Individual Sixes Points · Groups`, `
-        <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
-        ${validQuads.length ? validQuads.map((quad, qi)=>{
-          const groupRows = quad.players.filter(Boolean).map(name=>{
-            const {total:grossTotal, count:grossCount} = roundGrossTotal(round.id, name);
-            return { name, pts: totals[name]||0, grossTotal, grossCount };
-          }).sort((a,b)=>{
-            if(b.pts !== a.pts) return b.pts - a.pts;
-            const aHas = a.grossCount>0, bHas = b.grossCount>0;
-            if(aHas !== bHas) return aHas ? -1 : 1;
-            return a.grossTotal - b.grossTotal;
-          });
-          return `
-          <div class="group-lb-block" style="margin-bottom:14px;">
-            <div class="muted" style="font-family:'Oswald',sans-serif; letter-spacing:0.04em; font-size:12px; text-transform:uppercase; margin:0 0 6px;">Group ${qi+1}</div>
-            <div class="card">
-              ${groupRows.map((r,i)=>`
-                <div class="lb-row">
-                  <span class="lb-rank">${i+1}</span>
-                  <span class="lb-name">${escapeHtml(r.name)}</span>
-                  <span class="lb-score">${r.pts}</span>
-                </div>`).join('')}
-            </div>
-          </div>`;
-        }).join('') : `<div class="card"><div class="muted">Set up your foursomes for this round in Setup to see points.</div></div>`}`);
-
-      const pointsHtml = lbSection(`round-${round.id}-sixes-points`, `${escapeHtml(round.label)} — Individual Sixes Points`, `
+      sixesHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Individual Sixes Points</h2>
         <p class="muted" style="margin:-6px 0 12px;">(note: <strong>GROSS</strong> score will be used as a tie breaker)</p>
         <div class="card">
         ${hasGroups ? rows.map((r,i)=>`
@@ -1413,9 +1364,7 @@ function renderLeaderboard(){
             <span class="lb-name">${escapeHtml(r.name)}</span>
             <span class="lb-score">${r.pts}</span>
           </div>`).join('') : `<div class="muted">Set up your foursomes for this round in Setup to see points.</div>`}
-        </div>`);
-
-      sixesHtml = `${groupsHtml}${pointsHtml}`;
+        </div>`;
     }
 
     let pairsHtml = '';
@@ -1423,7 +1372,7 @@ function renderLeaderboard(){
       const teamResults = pairsTotalsForRound(round.id)
         .sort((a,b)=> (a.count===0)-(b.count===0) || a.total-b.total);
       const hasPairs = (round.pairs||[]).some(p=>p.players.filter(Boolean).length===2);
-      pairsHtml = lbSection(`round-${round.id}-pairs`, `${escapeHtml(round.label)} — Team Score (Best Ball Gross + Net)`, `
+      pairsHtml = `<h2 class="section-title">${escapeHtml(round.label)} — Team Score (Best Ball Gross + Net)</h2>
         <div class="card">
         ${hasPairs ? teamResults.map((r,i)=>`
           <div class="lb-row">
@@ -1432,7 +1381,7 @@ function renderLeaderboard(){
             <span class="lb-score ${r.count===0?'dim':''}">${r.count===0?'—':r.total}</span>
           </div>`).join('') : `<div class="muted">Set up your pairs for this round in Setup to see team scores.</div>`}
         </div>
-        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`);
+        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`;
     }
 
     const kpByHole = (round.kpHoles||[]).map(hole=>{
@@ -1457,7 +1406,7 @@ function renderLeaderboard(){
     const hasKpLd = (round.kpHoles||[]).length > 0 || (round.ldHoles||[]).length > 0;
     let kpLdHtml = '';
     if(hasKpLd){
-      kpLdHtml = lbSection(`round-${round.id}-kpld`, 'Daily KP and LD', `
+      kpLdHtml = `<h2 class="section-title">Daily KP and LD</h2>
         ${ldByHole.map(({hole, entries})=>`
           <div class="card kp-ld-card">
             <div class="kp-ld-row">
@@ -1474,7 +1423,7 @@ function renderLeaderboard(){
                 <span class="lb-name">${escapeHtml(e.player)}</span>
                 <span class="lb-score">${e.feet}' ${e.inches}"</span>
               </div>`).join('') : `<div class="muted">No entries yet</div>`}
-          </div>`).join('')}`);
+          </div>`).join('')}`;
     }
 
     const logoHtml = round.logoUrl
@@ -1502,22 +1451,22 @@ function renderLeaderboard(){
       ${kpLdHtml}
       ${pairsHtml}
       ${sixesHtml}
-      ${lbSection(`round-${round.id}-gross`, `${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross`, `
-        <div class="card">${gross.map((r,i)=>`
-          <div class="lb-row">
-            <span class="lb-rank">${r.count===0?'–':i+1}</span>
-            <span class="lb-name">${escapeHtml(r.name)}</span>
-            ${scoreCellHtml(r.count, r.total, r.toPar)}
-          </div>`).join('')}
-        </div>`)}
-      ${lbSection(`round-${round.id}-net`, `${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Net`, `
-        <div class="card">${net.map((r,i)=>`
-          <div class="lb-row">
-            <span class="lb-rank">${r.count===0?'–':i+1}</span>
-            <span class="lb-name">${escapeHtml(r.name)}</span>
-            ${scoreCellHtml(r.count, r.total, r.toPar)}
-          </div>`).join('')}
-        </div>`)}
+      <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Gross</h2>
+      <div class="card">${gross.map((r,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${r.count===0?'–':i+1}</span>
+          <span class="lb-name">${escapeHtml(r.name)}</span>
+          ${scoreCellHtml(r.count, r.total, r.toPar)}
+        </div>`).join('')}
+      </div>
+      <h2 class="section-title">${escapeHtml(round.label)} — ${escapeHtml(round.course)} · Net</h2>
+      <div class="card">${net.map((r,i)=>`
+        <div class="lb-row">
+          <span class="lb-rank">${r.count===0?'–':i+1}</span>
+          <span class="lb-name">${escapeHtml(r.name)}</span>
+          ${scoreCellHtml(r.count, r.total, r.toPar)}
+        </div>`).join('')}
+      </div>
     `;
   }
 }
@@ -1708,6 +1657,13 @@ function renderSetup(){
       Use Course Handicap tournament-wide (converts Index via Rating/Slope)
     </label>
     <p class="muted" style="margin:10px 0 0;">Default is off — net scoring uses each player's straight Handicap Index. Turn this on to convert it into a Course Handicap using each round's Rating and Slope instead. Any round below can override this individually.</p>
+  </div>
+  <div class="card">
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+      <input type="checkbox" id="chatEnabledCb" ${state.chatEnabled !== false ? 'checked' : ''} style="width:16px; height:16px; margin:0;">
+      Enable live Chat tab
+    </label>
+    <p class="muted" style="margin:10px 0 0;">Unchecking this hides the CHAT tab and disconnects it for everyone immediately — no re-upload needed. Existing messages aren't deleted; re-check to bring chat back.</p>
   </div>`;
 
   html += `<h2 class="section-title">Players &amp; Handicaps (${state.players.length})</h2><div class="card">`;
@@ -2039,6 +1995,11 @@ function attachHandlers(){
     const globalUseCourseHandicapCb = document.getElementById('globalUseCourseHandicap');
     if(globalUseCourseHandicapCb) globalUseCourseHandicapCb.onchange = async ()=>{
       state.useCourseHandicap = globalUseCourseHandicapCb.checked;
+      await saveState(); render();
+    };
+    const chatEnabledCb = document.getElementById('chatEnabledCb');
+    if(chatEnabledCb) chatEnabledCb.onchange = async ()=>{
+      state.chatEnabled = chatEnabledCb.checked;
       await saveState(); render();
     };
     const addPlayerBtn = document.getElementById('addPlayer');
@@ -2846,9 +2807,15 @@ async function chatCleanupOld(){
   }catch(e){ /* housekeeping only — never blocks chat */ }
 }
 
-function initChat(){
-  if(BACKEND.mode !== 'firebase' || !fbDb) return;
+let chatListenerActive = false;
+let chatQueryRef = null;
+
+function chatStartListener(){
+  if(chatListenerActive || BACKEND.mode !== 'firebase' || !fbDb) return;
+  chatListenerActive = true;
+  chatLoaded = false;
   const q = fbDb.ref('chat').orderByKey().limitToLast(CHAT_KEEP);
+  chatQueryRef = q;
   const fail = err=>{
     console.error('chat listener error', err);
     chatSetStatus('Chat is not set up yet (database rules for /chat are missing).');
@@ -2885,13 +2852,35 @@ function initChat(){
     chatUpdateBadge();
     chatCleanupOld();
   }, fail);
-
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState === 'visible' && currentTab === 'chat') chatMarkSeen();
-  });
 }
 
-initChat();
+// Disconnects the /chat subscription entirely (organizer turned chat off).
+// Existing messages in the database are untouched — this only stops this
+// device from listening, so re-enabling picks history back up instantly.
+function chatStopListener(){
+  if(!chatListenerActive) return;
+  chatListenerActive = false;
+  if(chatQueryRef) chatQueryRef.off();
+  chatQueryRef = null;
+  chatMsgs.clear();
+  chatLoaded = false;
+  chatErr = '';
+  const badge = document.getElementById('chatBadge');
+  if(badge){ badge.hidden = true; badge.textContent = ''; }
+  const btn = document.querySelector('nav.tabs button[data-tab="chat"]');
+  if(btn) btn.classList.remove('chat-unread');
+}
+
+// Called from render() on every render, so a toggle flipped by the organizer
+// (locally or synced in from Firebase) takes effect immediately for everyone.
+function chatSyncListener(){
+  if(state.chatEnabled === false) chatStopListener();
+  else chatStartListener();
+}
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible' && currentTab === 'chat') chatMarkSeen();
+});
 
 loadState();
 if(BACKEND.mode !== 'firebase'){
