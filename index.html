@@ -1034,7 +1034,11 @@ function normalizeState(s){
     hcpIndex: Array.isArray(r.hcpIndex) && r.hcpIndex.length===18 ? r.hcpIndex : blankHolesLocal18(),
     groups: Array.isArray(r.groups) ? r.groups : [],
     quads: Array.isArray(r.quads) ? r.quads : [],
-    pairs: Array.isArray(r.pairs) ? r.pairs : [],
+    pairs: Array.isArray(r.pairs) ? r.pairs.map(p=>({
+      id: (p && p.id) || ('pair-' + Math.random().toString(36).slice(2)),
+      players: (p && Array.isArray(p.players)) ? p.players : ['',''],
+      adjustment: (p && p.adjustment !== undefined && p.adjustment !== null && p.adjustment !== '') ? (Math.trunc(Number(p.adjustment)) || 0) : 0
+    })) : [],
     teeGroups: Array.isArray(r.teeGroups) ? r.teeGroups : [],
     kpHoles: Array.isArray(r.kpHoles) ? r.kpHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].kp.slice()) || []),
     ldHoles: Array.isArray(r.ldHoles) ? r.ldHoles : ((ROUND_KP_LD_DEFAULTS[r.id] && ROUND_KP_LD_DEFAULTS[r.id].ld.slice()) || []),
@@ -1251,6 +1255,7 @@ function pairsTotalsForRound(roundId){
   (round.pairs||[]).forEach((pair, pi)=>{
     if(pair.players.filter(Boolean).length !== 2) return;
     const [a,b] = pair.players;
+    const adjustment = Math.trunc(Number(pair.adjustment)) || 0;
     let total = 0, count = 0;
     for(let h=1; h<=18; h++){
       const ga = getScore(round.id, a, h), gb = getScore(round.id, b, h);
@@ -1260,7 +1265,8 @@ function pairsTotalsForRound(roundId){
       total += Math.min(ga, gb) + Math.min(na, nb);
       count++;
     }
-    results.push({ id: pair.id || `pair-${pi}`, label: `${a} & ${b}`, total, count });
+    total += adjustment;
+    results.push({ id: pair.id || `pair-${pi}`, label: `${a} & ${b}`, total, count, adjustment });
   });
   return results;
 }
@@ -1438,11 +1444,11 @@ function renderLeaderboard(){
         ${hasPairs ? teamResults.map((r,i)=>`
           <div class="lb-row">
             <span class="lb-rank">${r.count===0?'–':i+1}</span>
-            <span class="lb-name">${escapeHtml(r.label)}</span>
+            <span class="lb-name">${escapeHtml(r.label)}${r.adjustment ? ` <span class="hcp">(${r.adjustment>0?'+':''}${r.adjustment} adj)</span>` : ''}</span>
             <span class="lb-score ${r.count===0?'dim':''}">${r.count===0?'—':r.total}</span>
           </div>`).join('') : `<div class="muted">Set up your pairs for this round in Setup to see team scores.</div>`}
         </div>
-        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores. Summed over 18 — lowest total wins.</p>`);
+        <p class="muted">Each hole: lower of the pair's two gross scores, plus lower of their two net scores, summed over 18, plus any manual adjustment set in Setup — lowest total wins.</p>`);
     }
 
     const kpByHole = (round.kpHoles||[]).map(hole=>{
@@ -1898,6 +1904,8 @@ function renderSetup(){
               ${sortedPlayers().map(p=>`<option value="${escapeAttr(p.name)}" ${pair.players[slot]===p.name?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
             </select>
           `).join('')}
+          <label style="margin-top:2px;">Score Adjustment (+/-, best ball gross+net only)</label>
+          <input type="number" step="1" inputmode="numeric" placeholder="0" data-pair-adjustment="${round.id}:${pi}" value="${pair.adjustment || 0}">
         </div>`;
       });
       html += `<button class="btn secondary" data-add-pair="${round.id}">Add Pair</button></div></details>`;
@@ -2232,7 +2240,7 @@ function attachHandlers(){
     });
     document.querySelectorAll('[data-add-pair]').forEach(btn=>{
       btn.onclick = async ()=>{
-        getRound(btn.dataset.addPair).pairs.push({ id: 'pair-' + Date.now(), players:['',''] });
+        getRound(btn.dataset.addPair).pairs.push({ id: 'pair-' + Date.now(), players:['',''], adjustment: 0 });
         await saveState(); render();
       };
     });
@@ -2248,6 +2256,14 @@ function attachHandlers(){
       sel.onchange = async ()=>{
         const [rid, pi, slot] = sel.dataset.pairSlot.split(':');
         getRound(rid).pairs[Number(pi)].players[Number(slot)] = sel.value;
+        await saveState(); render();
+      };
+    });
+    document.querySelectorAll('[data-pair-adjustment]').forEach(inp=>{
+      inp.onchange = async ()=>{
+        const [rid, pi] = inp.dataset.pairAdjustment.split(':');
+        const v = inp.value.trim();
+        getRound(rid).pairs[Number(pi)].adjustment = v==='' ? 0 : (Math.trunc(Number(v)) || 0);
         await saveState(); render();
       };
     });
